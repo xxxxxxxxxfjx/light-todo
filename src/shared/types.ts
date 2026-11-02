@@ -1,0 +1,103 @@
+export type ViewKey =
+  | 'inbox'
+  | 'today'
+  | 'upcoming'
+  | 'all'
+  | 'someday'
+  | 'completed'
+  | 'list'
+  | 'tag'
+
+export interface Tag {
+  id: string
+  name: string
+  color: string | null
+  count?: number
+}
+
+export interface Folder {
+  id: string
+  name: string
+  sortOrder: number
+  createdAt: string
+}
+
+export interface List {
+  id: string
+  folderId: string | null
+  name: string
+  color: string | null
+  icon: string | null
+  sortOrder: number
+  isPinned: number
+  archivedAt: string | null
+  createdAt: string
+  count?: number
+}
+
+export interface Task {
+  id: string
+  listId: string | null
+  parentId: string | null
+  title: string
+  notes: string
+  priority: number
+  status: number
+  scheduledDate: string | null
+  dueAt: string | null
+  dueAllDay: number
+  rrule: string | null
+  repeatFrom: 'due' | 'completion' | null
+  reminderAt: string | null
+  completedAt: string | null
+  deletedAt: string | null
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+  tags: Tag[]
+  subtaskCount: number
+  subtaskDone: number
+  subtasks?: Task[]
+}
+
+export interface CreateTaskInput {
+  title: string
+  notes?: string
+  listId?: string | null
+  parentId?: string | null
+  priority?: number
+  scheduledDate?: string | null
+  dueAt?: string | null
+  dueAllDay?: number
+  rrule?: string | null
+  repeatFrom?: 'due' | 'completion' | null
+  reminderAt?: string | null
+  tagNames?: string[]
+}
+
+export interface UpdateTaskInput {
+  title?: string
+  notes?: string
+  listId?: string | null
+  priority?: number
+  scheduledDate?: string | null
+  dueAt?: string | null
+  dueAllDay?: number
+  rrule?: string | null
+  repeatFrom?: 'due' | 'completion' | null
+  reminderAt?: string | null
+  tagNames?: string[]
+}
+
+export interface SidebarData {
+  folders: Folder[]
+  lists: List[]
+  tags: Tag[]
+  counts: Record<string, number>
+}
+
+export interface AppInfo {
+  version: string
+  dataDir: string
+  platform: string
+}

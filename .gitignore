@@ -1,0 +1,17 @@
+node_modules/
+out/
+release/
+dist/
+.data/
+.qa-data/
+.qa-db/
+.shots/
+.electron-cache/
+.electron-test/
+.electron-userdata*/
+.npm-cache/
+.pnpm-store/
+*.log
+
+.data-*/
+
