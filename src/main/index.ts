@@ -1,16 +1,32 @@
-import { app, BrowserWindow, Menu, Tray, nativeImage, globalShortcut, screen } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  Menu,
+  Tray,
+  Notification,
+  nativeImage,
+  globalShortcut,
+  screen
+} from 'electron'
 import { join } from 'node:path'
 import { existsSync, writeFileSync } from 'node:fs'
 import { release } from 'node:os'
-import { initDb, closeDb } from './db'
+import { initDb, closeDb, getDueReminders, markReminderSent } from './db'
 import { registerIpc } from './ipc'
+import { backupNow, registerDataIpc } from './data'
 
 const isDev = !app.isPackaged
 
-// 开发环境把 Chromium 的 userData 也放进工作区，避免写到系统目录。
-if (isDev) {
-  const devRoot = process.env.LIGHTTODO_DATA_DIR ?? join(app.getAppPath(), '.data')
-  app.setPath('userData', join(devRoot, 'userdata'))
+// 便携版把数据放在 exe 同目录；开发环境放工作区；也可用环境变量显式指定。
+const portableRoot = process.env.PORTABLE_EXECUTABLE_DIR
+  ? join(process.env.PORTABLE_EXECUTABLE_DIR, 'LightTodoData')
+  : null
+const dataRootOverride =
+  process.env.LIGHTTODO_DATA_DIR ??
+  portableRoot ??
+  (isDev ? join(app.getAppPath(), '.data') : null)
+if (dataRootOverride) {
+  app.setPath('userData', join(dataRootOverride, 'userdata'))
 }
 
 const win11 = process.platform === 'win32' && Number(release().split('.')[2] ?? 0) >= 22000
@@ -28,6 +44,7 @@ let isQuitting = false
 
 function resolveDataDir(): string {
   if (process.env.LIGHTTODO_DATA_DIR) return process.env.LIGHTTODO_DATA_DIR
+  if (portableRoot) return portableRoot
   if (!app.isPackaged) return join(app.getAppPath(), '.data')
   return app.getPath('userData')
 }
@@ -136,6 +153,8 @@ async function runQa(win: BrowserWindow, mode: string): Promise<void> {
     detail: `document.querySelector('.task-row')?.click()`,
     upcoming: `[...document.querySelectorAll('.nav-item')].find((el) => el.textContent?.includes('最近 7 天'))?.click()`,
     complete: `document.querySelector('.task-row .check')?.click()`,
+    settings: `document.querySelector('.sb-foot .nav-item')?.click()`,
+    calendar: `[...document.querySelectorAll('.nav-item')].find((el) => el.textContent?.includes('日历'))?.click()`,
     search: `document.querySelector('.titlebar-search')?.click()`,
     searchquery: `document.querySelector('.titlebar-search')?.click(); setTimeout(() => {
       const i = document.querySelector('.search-input-row input');
@@ -179,6 +198,46 @@ function createTray(): void {
   tray.on('click', showMain)
 }
 
+function startReminderLoop(): void {
+  const tick = (): void => {
+    let due: ReturnType<typeof getDueReminders>
+    try {
+      due = getDueReminders(new Date().toISOString())
+    } catch (e) {
+      console.error('reminder query failed', e)
+      return
+    }
+    if (!due.length) return
+    const supported = Notification.isSupported()
+    for (const task of due.slice(0, 3)) {
+      if (supported) {
+        const n = new Notification({
+          title: '轻单 · 提醒',
+          body: task.title,
+          silent: false
+        })
+        n.on('click', () => {
+          showMain()
+          sendToRenderer('ui:open-task', task.id)
+        })
+        n.show()
+      }
+      markReminderSent(task.id)
+    }
+    if (due.length > 3) {
+      if (supported) {
+        new Notification({
+          title: '轻单',
+          body: `还有 ${due.length - 3} 条提醒，打开应用查看`
+        }).show()
+      }
+      for (const task of due.slice(3)) markReminderSent(task.id)
+    }
+  }
+  setTimeout(tick, 3000)
+  setInterval(tick, 30000)
+}
+
 function registerShortcuts(): void {
   const ok = globalShortcut.register('CommandOrControl+Shift+Space', quickAdd)
   if (!ok) console.warn('GLOBAL_SHORTCUT_FAILED')
@@ -188,9 +247,12 @@ app.whenReady().then(() => {
   app.setAppUserModelId('com.lighttodo.app')
   initDb(resolveDataDir())
   registerIpc()
+  registerDataIpc()
+  backupNow('startup')
   createWindow()
   createTray()
   registerShortcuts()
+  startReminderLoop()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -207,5 +269,6 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   isQuitting = true
   globalShortcut.unregisterAll()
+  backupNow('exit')
   closeDb()
 })

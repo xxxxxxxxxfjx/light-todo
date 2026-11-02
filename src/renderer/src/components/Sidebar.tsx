@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import {
+  Calendar,
   CalendarDays,
   CheckCircle2,
   Inbox,
@@ -17,13 +18,14 @@ const NAV: { key: ViewKey; label: string; icon: typeof Inbox }[] = [
   { key: 'inbox', label: '收件箱', icon: Inbox },
   { key: 'today', label: '今天', icon: Sun },
   { key: 'upcoming', label: '最近 7 天', icon: CalendarDays },
+  { key: 'calendar', label: '日历', icon: Calendar },
   { key: 'all', label: '全部', icon: Layers },
   { key: 'someday', label: '也许', icon: Moon },
   { key: 'completed', label: '已完成', icon: CheckCircle2 }
 ]
 
 export function Sidebar(): React.JSX.Element {
-  const { sidebar, view, setView, refreshSidebar, openQuickAdd, showToast } = useStore()
+  const { sidebar, view, setView, refreshSidebar, openQuickAdd, openSettings, showToast } = useStore()
   const [creating, setCreating] = useState<'list' | 'folder' | null>(null)
   const [draft, setDraft] = useState('')
 
@@ -183,9 +185,9 @@ export function Sidebar(): React.JSX.Element {
       )}
 
       <div className="sb-foot">
-        <button className="nav-item ghost" onClick={() => window.api.app.openDataDir()}>
+        <button className="nav-item ghost" onClick={openSettings}>
           <Settings size={15} className="nav-icon" />
-          <span className="nav-label">数据目录</span>
+          <span className="nav-label">设置</span>
         </button>
       </div>
     </aside>

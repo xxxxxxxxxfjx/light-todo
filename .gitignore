@@ -15,3 +15,11 @@ dist/
 
 .data-*/
 
+
+.zip-test/
+.zip-data/
+.pkg-data/
+.packaged-data/
+.portable-data/
+.qa-recur/
+

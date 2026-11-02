@@ -2,9 +2,11 @@ import { useEffect } from 'react'
 import { TitleBar } from './components/TitleBar'
 import { Sidebar } from './components/Sidebar'
 import { TaskList } from './components/TaskList'
+import { CalendarView } from './components/CalendarView'
 import { DetailPanel } from './components/DetailPanel'
 import { QuickAdd } from './components/QuickAdd'
 import { SearchPalette } from './components/SearchPalette'
+import { SettingsModal } from './components/SettingsModal'
 import { useStore } from './store'
 
 export default function App(): React.JSX.Element {
@@ -13,21 +15,29 @@ export default function App(): React.JSX.Element {
     refreshSidebar,
     quickAddOpen,
     searchOpen,
+    settingsOpen,
     openQuickAdd,
     openSearch,
     closeQuickAdd,
     closeSearch,
+    closeSettings,
     toast,
     selected,
     toggleTask,
-    setView
+    setView,
+    view,
+    selectTaskById
   } = useStore()
 
   useEffect(() => {
     refreshSidebar()
     refresh()
-    const off = window.api.onQuickAdd(() => openQuickAdd())
-    return off
+    const offQuick = window.api.onQuickAdd(() => openQuickAdd())
+    const offOpen = window.api.onOpenTask((id) => selectTaskById(id))
+    return () => {
+      offQuick()
+      offOpen()
+    }
   }, [])
 
   useEffect(() => {
@@ -50,6 +60,7 @@ export default function App(): React.JSX.Element {
       if (mod && e.key === 'Escape') {
         closeQuickAdd()
         closeSearch()
+        closeSettings()
         return
       }
       if (typing) return
@@ -82,11 +93,12 @@ export default function App(): React.JSX.Element {
       <TitleBar onSearch={openSearch} />
       <div className="shell">
         <Sidebar />
-        <TaskList />
+        {view.type === 'calendar' ? <CalendarView /> : <TaskList />}
         <DetailPanel />
       </div>
       {quickAddOpen && <QuickAdd />}
       {searchOpen && <SearchPalette />}
+      {settingsOpen && <SettingsModal />}
       {toast && <div className="toast">{toast}</div>}
     </div>
   )

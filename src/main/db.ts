@@ -3,6 +3,9 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { addDays, format, startOfDay } from 'date-fns'
+import rrulePkg from 'rrule'
+
+const { RRule } = rrulePkg
 import type {
   CreateTaskInput,
   Folder,
@@ -51,6 +54,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   rrule          TEXT,
   repeat_from    TEXT,
   reminder_at    TEXT,
+  reminder_offset INTEGER,
+  notified_at    TEXT,
   completed_at   TEXT,
   deleted_at     TEXT,
   sort_order     REAL NOT NULL DEFAULT 0,
@@ -110,6 +115,8 @@ export function initDb(dir: string): void {
   db.exec('PRAGMA journal_mode = WAL')
   db.exec('PRAGMA foreign_keys = ON')
   db.exec(SCHEMA)
+  ensureColumn('tasks', 'reminder_offset', 'INTEGER')
+  ensureColumn('tasks', 'notified_at', 'TEXT')
   seedIfEmpty()
 }
 
@@ -124,6 +131,30 @@ export function closeDb(): void {
 
 function nowIso(): string {
   return new Date().toISOString()
+}
+
+function ensureColumn(table: string, column: string, type: string): void {
+  const cols = conn().prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+  if (!cols.some((c) => c.name === column)) {
+    conn().exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
+  }
+}
+
+function reminderTime(
+  dueAt: string | null,
+  scheduledDate: string | null,
+  offsetMinutes: number | null
+): string | null {
+  if (offsetMinutes === null) return null
+  let base: Date | null = null
+  if (dueAt) {
+    base = new Date(dueAt)
+  } else if (scheduledDate) {
+    const [y, mo, d] = scheduledDate.split('-').map(Number)
+    base = new Date(y, (mo ?? 1) - 1, d ?? 1, 9, 0, 0, 0)
+  }
+  if (!base || isNaN(base.getTime())) return null
+  return new Date(base.getTime() - offsetMinutes * 60000).toISOString()
 }
 
 function dayStr(d: Date): string {
@@ -203,6 +234,11 @@ function mapTask(r: Record<string, unknown>): Task {
     rrule: (r.rrule as string) ?? null,
     repeatFrom: (r.repeat_from as Task['repeatFrom']) ?? null,
     reminderAt: (r.reminder_at as string) ?? null,
+    reminderOffset:
+      r.reminder_offset === null || r.reminder_offset === undefined
+        ? null
+        : Number(r.reminder_offset),
+    notifiedAt: (r.notified_at as string) ?? null,
     completedAt: (r.completed_at as string) ?? null,
     deletedAt: (r.deleted_at as string) ?? null,
     sortOrder: Number(r.sort_order ?? 0),
@@ -257,6 +293,9 @@ export function listTasks(opts: {
       where += ' AND t.status = 1'
       order = 't.completed_at DESC'
       limit = opts.limit ?? 300
+      break
+    case 'calendar':
+      where += ' AND t.status = 0'
       break
     case 'list':
       where += ' AND t.status = 0 AND t.list_id = ?'
@@ -333,10 +372,14 @@ export function createTask(input: CreateTaskInput): Task {
       | undefined
     if (parent) listId = parent.list_id
   }
+  const offset = input.reminderOffset ?? null
+  const reminderAt =
+    input.reminderAt ??
+    reminderTime(input.dueAt ?? null, input.scheduledDate ?? null, offset)
   conn()
     .prepare(
-      `INSERT INTO tasks (id,list_id,parent_id,title,notes,priority,status,scheduled_date,due_at,due_all_day,rrule,repeat_from,reminder_at,created_at,updated_at,sort_order)
-       VALUES (?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?)`
+      `INSERT INTO tasks (id,list_id,parent_id,title,notes,priority,status,scheduled_date,due_at,due_all_day,rrule,repeat_from,reminder_at,reminder_offset,notified_at,created_at,updated_at,sort_order)
+       VALUES (?,?,?,?,?,?,0,?,?,?,?,?,?,?,NULL,?,?,?)`
     )
     .run(
       id,
@@ -350,7 +393,8 @@ export function createTask(input: CreateTaskInput): Task {
       input.dueAllDay ?? 0,
       input.rrule ?? null,
       input.repeatFrom ?? null,
-      input.reminderAt ?? null,
+      reminderAt,
+      offset,
       now,
       now,
       nextSortOrder(listId, input.parentId ?? null)
@@ -381,6 +425,26 @@ export function updateTask(id: string, patch: UpdateTaskInput): Task {
   if (patch.rrule !== undefined) set('rrule', patch.rrule)
   if (patch.repeatFrom !== undefined) set('repeat_from', patch.repeatFrom)
   if (patch.reminderAt !== undefined) set('reminder_at', patch.reminderAt)
+  if (patch.reminderOffset !== undefined) set('reminder_offset', patch.reminderOffset)
+
+  if (
+    patch.dueAt !== undefined ||
+    patch.scheduledDate !== undefined ||
+    patch.reminderOffset !== undefined
+  ) {
+    const cur = conn()
+      .prepare('SELECT due_at, scheduled_date, reminder_offset FROM tasks WHERE id = ?')
+      .get(id) as
+      | { due_at: string | null; scheduled_date: string | null; reminder_offset: number | null }
+      | undefined
+    const dueAt = patch.dueAt !== undefined ? patch.dueAt : (cur?.due_at ?? null)
+    const scheduled = patch.scheduledDate !== undefined ? patch.scheduledDate : (cur?.scheduled_date ?? null)
+    const offset =
+      patch.reminderOffset !== undefined ? patch.reminderOffset : (cur?.reminder_offset ?? null)
+    set('reminder_at', reminderTime(dueAt, scheduled, offset))
+    set('notified_at', null)
+  }
+
   fields.push('updated_at = ?')
   params.push(nowIso())
 
@@ -399,6 +463,11 @@ export function updateTask(id: string, patch: UpdateTaskInput): Task {
 }
 
 export function setTaskStatus(id: string, done: boolean): void {
+  const task = getTask(id)
+  if (!task) return
+  if (done && task.status === 0 && task.rrule) {
+    spawnNextOccurrence(task)
+  }
   const now = nowIso()
   const conn0 = conn()
   conn0.prepare('UPDATE tasks SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?').run(
@@ -412,6 +481,70 @@ export function setTaskStatus(id: string, done: boolean): void {
       .prepare('UPDATE tasks SET status = 1, completed_at = ?, updated_at = ? WHERE parent_id = ? AND deleted_at IS NULL')
       .run(now, now, id)
   }
+  if (done) {
+    conn0.prepare('UPDATE tasks SET reminder_at = NULL WHERE id = ?').run(id)
+  }
+}
+
+function spawnNextOccurrence(task: Task): void {
+  try {
+    let base: Date | null = null
+    if (task.repeatFrom === 'completion') {
+      base = new Date()
+    } else if (task.dueAt) {
+      base = new Date(task.dueAt)
+    } else if (task.scheduledDate) {
+      const [y, m, d] = task.scheduledDate.split('-').map(Number)
+      base = new Date(y, (m ?? 1) - 1, d ?? 1, 9, 0, 0, 0)
+    }
+    if (!base || !task.rrule) return
+    const rule = new RRule({ ...RRule.parseString(task.rrule), dtstart: base })
+    const next = rule.after(base, false)
+    if (!next) return
+
+    const nextDate = format(next, 'yyyy-MM-dd')
+    let nextDue: string | null = null
+    if (task.dueAt) {
+      const original = new Date(task.dueAt)
+      const d = new Date(next)
+      d.setHours(original.getHours(), original.getMinutes(), 0, 0)
+      nextDue = d.toISOString()
+    }
+    const created = createTask({
+      title: task.title,
+      notes: task.notes,
+      listId: task.listId,
+      priority: task.priority,
+      scheduledDate: nextDate,
+      dueAt: nextDue,
+      dueAllDay: task.dueAllDay,
+      rrule: task.rrule,
+      repeatFrom: task.repeatFrom,
+      reminderOffset: task.reminderOffset,
+      tagNames: task.tags.map((t) => t.name)
+    })
+    for (const sub of task.subtasks ?? []) {
+      createTask({ title: sub.title, parentId: created.id, priority: sub.priority })
+    }
+  } catch (e) {
+    console.error('spawnNextOccurrence failed', e)
+  }
+}
+
+export function getDueReminders(nowIsoStr: string): Task[] {
+  const rows = conn()
+    .prepare(
+      `SELECT t.*, ${TAGS_SUBQUERY}, ${SUBTASK_COUNTS} FROM tasks t
+       WHERE t.deleted_at IS NULL AND t.status = 0 AND t.reminder_at IS NOT NULL
+         AND t.reminder_at <= ? AND t.notified_at IS NULL
+       ORDER BY t.reminder_at ASC LIMIT 20`
+    )
+    .all(nowIsoStr) as Record<string, unknown>[]
+  return rows.map(mapTask)
+}
+
+export function markReminderSent(id: string): void {
+  conn().prepare('UPDATE tasks SET notified_at = ? WHERE id = ?').run(nowIso(), id)
 }
 
 export function deleteTask(id: string): void {
@@ -614,6 +747,36 @@ export function searchTasks(q: string): Task[] {
     )
     .all(term, term, term) as Record<string, unknown>[]
   return rows.map(mapTask)
+}
+
+export function checkpoint(): void {
+  try {
+    conn().exec('PRAGMA wal_checkpoint(TRUNCATE)')
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getAllData(): {
+  exportedAt: string
+  folders: Folder[]
+  lists: List[]
+  tags: Tag[]
+  tasks: Task[]
+} {
+  const rows = conn()
+    .prepare(
+      `SELECT t.*, ${TAGS_SUBQUERY}, ${SUBTASK_COUNTS} FROM tasks t
+       WHERE t.deleted_at IS NULL ORDER BY t.created_at ASC`
+    )
+    .all() as Record<string, unknown>[]
+  return {
+    exportedAt: new Date().toISOString(),
+    folders: getFolders(),
+    lists: getLists(),
+    tags: getTags(),
+    tasks: rows.map(mapTask)
+  }
 }
 
 export function getSetting(key: string): string | null {

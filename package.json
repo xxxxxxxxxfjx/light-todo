@@ -13,7 +13,9 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "icons": "node scripts/gen-icons.mjs",
-    "dist": "electron-vite build && electron-builder --win nsis portable"
+    "dist": "electron-vite build && electron-builder --win portable",
+    "dist:setup": "electron-vite build && electron-builder --win nsis",
+    "dist:zip": "electron-vite build && electron-builder --win dir"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.25",
@@ -44,7 +46,7 @@
   },
   "build": {
     "appId": "com.lighttodo.app",
-    "productName": "轻单",
+    "productName": "LightTodo",
     "directories": {
       "buildResources": "build",
       "output": "release"
@@ -59,6 +61,7 @@
         "to": "icon.png"
       }
     ],
+    "npmRebuild": false,
     "win": {
       "target": [
         {
@@ -81,7 +84,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "轻单"
+      "shortcutName": "LightTodo",
+      "artifactName": "LightTodo-Setup-${version}.${ext}"
     }
   }
 }

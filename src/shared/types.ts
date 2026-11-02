@@ -5,6 +5,7 @@ export type ViewKey =
   | 'all'
   | 'someday'
   | 'completed'
+  | 'calendar'
   | 'list'
   | 'tag'
 
@@ -49,6 +50,8 @@ export interface Task {
   rrule: string | null
   repeatFrom: 'due' | 'completion' | null
   reminderAt: string | null
+  reminderOffset: number | null
+  notifiedAt: string | null
   completedAt: string | null
   deletedAt: string | null
   sortOrder: number
@@ -72,6 +75,7 @@ export interface CreateTaskInput {
   rrule?: string | null
   repeatFrom?: 'due' | 'completion' | null
   reminderAt?: string | null
+  reminderOffset?: number | null
   tagNames?: string[]
 }
 
@@ -86,6 +90,7 @@ export interface UpdateTaskInput {
   rrule?: string | null
   repeatFrom?: 'due' | 'completion' | null
   reminderAt?: string | null
+  reminderOffset?: number | null
   tagNames?: string[]
 }
 

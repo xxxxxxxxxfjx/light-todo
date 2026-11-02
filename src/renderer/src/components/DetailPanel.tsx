@@ -126,6 +126,24 @@ export function DetailPanel(): React.JSX.Element {
             />
           </Field>
 
+          <Field label="提醒">
+            <select
+              value={task.reminderOffset === null ? '' : String(task.reminderOffset)}
+              onChange={(e) =>
+                updateTask(task.id, {
+                  reminderOffset: e.target.value === '' ? null : Number(e.target.value)
+                })
+              }
+            >
+              <option value="">不提醒</option>
+              <option value="0">准时</option>
+              <option value="5">提前 5 分钟</option>
+              <option value="15">提前 15 分钟</option>
+              <option value="60">提前 1 小时</option>
+              <option value="1440">提前 1 天</option>
+            </select>
+          </Field>
+
           <Field label="优先级">
             <div className="segmented">
               {[

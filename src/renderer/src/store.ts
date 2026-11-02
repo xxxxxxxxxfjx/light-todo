@@ -18,6 +18,7 @@ interface AppStore {
   loading: boolean
   quickAddOpen: boolean
   searchOpen: boolean
+  settingsOpen: boolean
   toast: string
   setView: (type: ViewKey, opts?: { listId?: string; tagId?: string; title?: string }) => Promise<void>
   refresh: () => Promise<void>
@@ -32,6 +33,8 @@ interface AppStore {
   closeQuickAdd: () => void
   openSearch: () => void
   closeSearch: () => void
+  openSettings: () => void
+  closeSettings: () => void
   showToast: (msg: string) => void
 }
 
@@ -45,6 +48,7 @@ export const useStore = create<AppStore>((set, get) => ({
   loading: false,
   quickAddOpen: false,
   searchOpen: false,
+  settingsOpen: false,
   toast: '',
 
   setView: async (type, opts) => {
@@ -57,6 +61,7 @@ export const useStore = create<AppStore>((set, get) => ({
         all: '全部',
         someday: '也许',
         completed: '已完成',
+        calendar: '日历',
         list: '清单',
         tag: '标签'
       } as Record<ViewKey, string>)[type]
@@ -137,8 +142,10 @@ export const useStore = create<AppStore>((set, get) => ({
 
   openQuickAdd: () => set({ quickAddOpen: true, searchOpen: false }),
   closeQuickAdd: () => set({ quickAddOpen: false }),
-  openSearch: () => set({ searchOpen: true, quickAddOpen: false }),
+  openSearch: () => set({ searchOpen: true, quickAddOpen: false, settingsOpen: false }),
   closeSearch: () => set({ searchOpen: false }),
+  openSettings: () => set({ settingsOpen: true, quickAddOpen: false, searchOpen: false }),
+  closeSettings: () => set({ settingsOpen: false }),
 
   showToast: (msg) => {
     if (toastTimer) clearTimeout(toastTimer)

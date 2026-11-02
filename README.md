@@ -15,15 +15,18 @@ Windows 上最快的中文待办 —— 本地优先、键盘优先、开箱即�
 - 中文 NLP：今天/明天/下周三/3月5日/今晚8点/每周一三五/每月5号/每月第2个周二/每3天/工作日/!高/#清单/@标签
 - 搜索：`Ctrl+K`，标题 / 备注 / 标签
 - 托盘常驻、全局快捷键、开机自启、Jump List、URL Scheme（脚手架已接）
-- 每日备份、导入导出（待 M5）
+- 重复任务：RRULE 引擎，完成后自动生成下一次，支持按计划 / 按完成两种语义
+- 提醒：任务级提醒（准时 / 提前 5 分钟 / 15 分钟 / 1 小时 / 1 天），30 秒轮询 + 系统 Toast
+- 日历视图：月历、任务落格、今天高亮、双击完成
+- 设置页：数据目录、JSON / Markdown 导出、立即备份、备份目录、开机自启
+- 数据：启动 / 退出自动备份（保留 14 份）、SQLite WAL checkpoint
+- 打包：win-unpacked + 便携版 exe（NSIS 安装包见 `pnpm dist`）
 
 待完成：
 
-- 重复任务引擎（RRULE 计算下一次、按完成/按计划两种语义）
-- 提醒调度（Toast、稍后提醒、休眠补偿）
-- 日历视图（月/周）
-- 数据导入导出、备份恢复、设置页
-- 打包（NSIS 安装包 + 便携版）、性能验收
+- Todoist / TickTick CSV 导入
+- 性能验收（冷启动 / 内存 / 1 万条任务）
+- 代码签名（可选）、自动更新（可选）
 
 ## 技术栈
 
@@ -52,9 +55,14 @@ pnpm install
 pnpm dev          # 开发模式（需要能启动 Electron 的桌面环境）
 pnpm build        # 构建到 out/
 pnpm start        # 运行已构建版本（electron .）
-pnpm dist         # 打 Windows 安装包 + 便携版
+pnpm dist         # 打便携版 exe（release/LightTodo-0.1.0-x64.exe）
+pnpm dist:zip     # 打 win-unpacked，再自行压缩为 zip
+pnpm dist:setup   # 打 NSIS 安装包（在部分受限/无桌面会话环境会失败，正常机器可用）
 pnpm typecheck    # 类型检查
 ```
+
+当前产物（已验证可运行）：`release/win-unpacked/LightTodo.exe` 与
+`release/LightTodo-0.1.0-portable.zip`（解压后运行 `LightTodo.exe`）。
 
 开发数据默认放在项目下 `.data/`，打包后放在 `%APPDATA%/轻单/`。
 

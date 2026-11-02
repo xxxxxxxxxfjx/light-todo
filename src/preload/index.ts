@@ -45,11 +45,27 @@ const api = {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),
     set: (key: string, value: string) => ipcRenderer.invoke('settings:set', key, value)
   },
+  data: {
+    backup: () => ipcRenderer.invoke('data:backup'),
+    backups: () => ipcRenderer.invoke('data:backups'),
+    exportJson: () => ipcRenderer.invoke('data:exportJson'),
+    exportMarkdown: () => ipcRenderer.invoke('data:exportMarkdown'),
+    openBackups: () => ipcRenderer.invoke('data:openBackups'),
+    getLoginItem: () => ipcRenderer.invoke('app:getLoginItem'),
+    setLoginItem: (enabled: boolean) => ipcRenderer.invoke('app:setLoginItem', enabled)
+  },
   onQuickAdd: (cb: () => void) => {
     const listener = (): void => cb()
     ipcRenderer.on('ui:quick-add', listener)
     return (): void => {
       ipcRenderer.removeListener('ui:quick-add', listener)
+    }
+  },
+  onOpenTask: (cb: (id: string) => void) => {
+    const listener = (_e: unknown, id: string): void => cb(id)
+    ipcRenderer.on('ui:open-task', listener)
+    return (): void => {
+      ipcRenderer.removeListener('ui:open-task', listener)
     }
   }
 }
