@@ -1,7 +1,17 @@
 import { app, dialog, ipcMain, shell } from 'electron'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs'
+import { basename, join } from 'node:path'
 import { checkpoint, getAllData, getDataDir } from './db'
+import { importFromText } from './import'
 
 function stamp(): string {
   const d = new Date()
@@ -115,6 +125,21 @@ export function registerDataIpc(): void {
     const dir = join(getDataDir(), 'backups')
     mkdirSync(dir, { recursive: true })
     await shell.openPath(dir)
+  })
+  ipcMain.handle('data:import', async () => {
+    const res = await dialog.showOpenDialog({
+      title: '导入任务',
+      properties: ['openFile'],
+      filters: [
+        { name: '轻单 JSON / CSV', extensions: ['json', 'csv'] },
+        { name: '所有文件', extensions: ['*'] }
+      ]
+    })
+    if (res.canceled || !res.filePaths.length) {
+      return { ok: false, lists: 0, tasks: 0, tags: 0, errors: [], message: '已取消' }
+    }
+    const path = res.filePaths[0]
+    return importFromText(readFileSync(path, 'utf8'), basename(path))
   })
   ipcMain.handle('app:getLoginItem', () => app.getLoginItemSettings().openAtLogin)
   ipcMain.handle('app:setLoginItem', (_e, enabled: boolean) => {

@@ -51,6 +51,7 @@ const api = {
     exportJson: () => ipcRenderer.invoke('data:exportJson'),
     exportMarkdown: () => ipcRenderer.invoke('data:exportMarkdown'),
     openBackups: () => ipcRenderer.invoke('data:openBackups'),
+    import: () => ipcRenderer.invoke('data:import'),
     getLoginItem: () => ipcRenderer.invoke('app:getLoginItem'),
     setLoginItem: (enabled: boolean) => ipcRenderer.invoke('app:setLoginItem', enabled)
   },

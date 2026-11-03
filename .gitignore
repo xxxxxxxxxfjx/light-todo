@@ -23,3 +23,10 @@ dist/
 .portable-data/
 .qa-recur/
 
+.final-data/
+.qa-perf/
+.qa-small/
+.qa-data/
+.qa-db/
+.qa-import/
+.qa-recur/

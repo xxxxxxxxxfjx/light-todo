@@ -9,7 +9,7 @@ interface Backup {
 }
 
 export function SettingsModal(): React.JSX.Element {
-  const { closeSettings, showToast } = useStore()
+  const { closeSettings, showToast, refresh, refreshSidebar } = useStore()
   const [info, setInfo] = useState<{ version: string; dataDir: string } | null>(null)
   const [login, setLogin] = useState(false)
   const [backups, setBackups] = useState<Backup[]>([])
@@ -62,6 +62,24 @@ export function SettingsModal(): React.JSX.Element {
               <button className="mini-btn" onClick={() => exportFile('md')}>
                 <Download size={12} /> Markdown
               </button>
+            </div>
+            <div className="set-row">
+              <span className="set-label">导入</span>
+              <button
+                className="mini-btn"
+                onClick={async () => {
+                  const r = await window.api.data.import()
+                  if (r.ok) {
+                    showToast(`已导入 ${r.tasks} 条任务、${r.lists} 个清单`)
+                    await Promise.all([refresh(), refreshSidebar()])
+                  } else if (r.message !== '已取消') {
+                    showToast(`导入失败：${r.message ?? '未知错误'}`)
+                  }
+                }}
+              >
+                <Download size={12} /> JSON / CSV
+              </button>
+              <span className="set-hint">支持轻单 JSON、TickTick 与 Todoist CSV</span>
             </div>
             <div className="set-row">
               <span className="set-label">备份</span>

@@ -15,6 +15,7 @@ import { initDb, closeDb, getDueReminders, markReminderSent } from './db'
 import { registerIpc } from './ipc'
 import { backupNow, registerDataIpc } from './data'
 
+const T0 = Date.now()
 const isDev = !app.isPackaged
 
 // 便携版把数据放在 exe 同目录；开发环境放工作区；也可用环境变量显式指定。
@@ -104,6 +105,7 @@ function createWindow(): void {
   })
 
   mainWindow.once('ready-to-show', () => {
+    console.log('COLD_START_MS', Date.now() - T0)
     mainWindow?.show()
     if (shotPath) {
       setTimeout(async () => {
@@ -155,6 +157,7 @@ async function runQa(win: BrowserWindow, mode: string): Promise<void> {
     complete: `document.querySelector('.task-row .check')?.click()`,
     settings: `document.querySelector('.sb-foot .nav-item')?.click()`,
     calendar: `[...document.querySelectorAll('.nav-item')].find((el) => el.textContent?.includes('日历'))?.click()`,
+    all: `[...document.querySelectorAll('.nav-item')].find((el) => el.textContent?.trim().startsWith('全部'))?.click()`,
     search: `document.querySelector('.titlebar-search')?.click()`,
     searchquery: `document.querySelector('.titlebar-search')?.click(); setTimeout(() => {
       const i = document.querySelector('.search-input-row input');
@@ -248,11 +251,12 @@ app.whenReady().then(() => {
   initDb(resolveDataDir())
   registerIpc()
   registerDataIpc()
-  backupNow('startup')
   createWindow()
   createTray()
   registerShortcuts()
   startReminderLoop()
+  // 备份放到窗口显示之后，不阻塞冷启动
+  setTimeout(() => backupNow('startup'), 3000)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
