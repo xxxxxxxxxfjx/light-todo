@@ -222,6 +222,9 @@ export function DetailPanel(): React.JSX.Element {
                   if (e.key === 'Enter') addSubtask()
                 }}
               />
+              <button className="subtask-add-btn" onClick={addSubtask}>
+                添加
+              </button>
             </div>
           </div>
         </div>

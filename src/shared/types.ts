@@ -5,6 +5,7 @@ export type ViewKey =
   | 'all'
   | 'someday'
   | 'completed'
+  | 'trash'
   | 'calendar'
   | 'list'
   | 'tag'

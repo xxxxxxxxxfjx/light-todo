@@ -21,8 +21,9 @@ function Chip({
 }
 
 export function QuickAdd(): React.JSX.Element {
-  const { closeQuickAdd, createTask, sidebar, refreshSidebar, showToast, view } = useStore()
-  const [text, setText] = useState('')
+  const { closeQuickAdd, createTask, sidebar, refreshSidebar, showToast, view, quickAddInitial } =
+    useStore()
+  const [text, setText] = useState(quickAddInitial)
   const ref = useRef<HTMLTextAreaElement>(null)
   const parsed = useMemo(() => parseQuickAdd(text), [text])
 

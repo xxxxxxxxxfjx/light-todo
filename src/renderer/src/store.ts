@@ -8,6 +8,8 @@ export interface ViewState {
   title: string
 }
 
+export type TaskFilter = 'all' | 'overdue' | 'today' | 'high' | 'nodate'
+
 const EMPTY_SIDEBAR: SidebarData = { folders: [], lists: [], tags: [], counts: {} }
 
 interface AppStore {
@@ -16,10 +18,13 @@ interface AppStore {
   selected: Task | null
   sidebar: SidebarData
   loading: boolean
+  filter: TaskFilter
   quickAddOpen: boolean
+  quickAddInitial: string
   searchOpen: boolean
   settingsOpen: boolean
   toast: string
+  setFilter: (f: TaskFilter) => void
   setView: (type: ViewKey, opts?: { listId?: string; tagId?: string; title?: string }) => Promise<void>
   refresh: () => Promise<void>
   refreshSidebar: () => Promise<void>
@@ -29,7 +34,9 @@ interface AppStore {
   createTask: (input: CreateTaskInput) => Promise<Task>
   updateTask: (id: string, patch: UpdateTaskInput) => Promise<Task | null>
   deleteTask: (id: string) => Promise<void>
-  openQuickAdd: () => void
+  restoreTask: (id: string) => Promise<void>
+  purgeTask: (id: string) => Promise<void>
+  openQuickAdd: (text?: string) => void
   closeQuickAdd: () => void
   openSearch: () => void
   closeSearch: () => void
@@ -46,10 +53,14 @@ export const useStore = create<AppStore>((set, get) => ({
   selected: null,
   sidebar: EMPTY_SIDEBAR,
   loading: false,
+  filter: 'all',
   quickAddOpen: false,
+  quickAddInitial: '',
   searchOpen: false,
   settingsOpen: false,
   toast: '',
+
+  setFilter: (filter) => set({ filter }),
 
   setView: async (type, opts) => {
     const title =
@@ -61,11 +72,12 @@ export const useStore = create<AppStore>((set, get) => ({
         all: '全部',
         someday: '也许',
         completed: '已完成',
+        trash: '回收站',
         calendar: '日历',
         list: '清单',
         tag: '标签'
       } as Record<ViewKey, string>)[type]
-    set({ view: { type, ...opts, title }, selected: null })
+    set({ view: { type, ...opts, title }, selected: null, filter: 'all' })
     await get().refresh()
   },
 
@@ -140,8 +152,20 @@ export const useStore = create<AppStore>((set, get) => ({
     get().showToast('已移到回收站')
   },
 
-  openQuickAdd: () => set({ quickAddOpen: true, searchOpen: false }),
-  closeQuickAdd: () => set({ quickAddOpen: false }),
+  restoreTask: async (id) => {
+    await window.api.tasks.restore(id)
+    await Promise.all([get().refresh(), get().refreshSidebar()])
+    get().showToast('已恢复')
+  },
+
+  purgeTask: async (id) => {
+    await window.api.tasks.purge(id)
+    await Promise.all([get().refresh(), get().refreshSidebar()])
+    get().showToast('已彻底删除')
+  },
+
+  openQuickAdd: (text = '') => set({ quickAddOpen: true, quickAddInitial: text, searchOpen: false }),
+  closeQuickAdd: () => set({ quickAddOpen: false, quickAddInitial: '' }),
   openSearch: () => set({ searchOpen: true, quickAddOpen: false, settingsOpen: false }),
   closeSearch: () => set({ searchOpen: false }),
   openSettings: () => set({ settingsOpen: true, quickAddOpen: false, searchOpen: false }),

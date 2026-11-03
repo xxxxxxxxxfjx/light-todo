@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { format, addDays } from 'date-fns'
 import { TitleBar } from './components/TitleBar'
 import { Sidebar } from './components/Sidebar'
 import { TaskList } from './components/TaskList'
@@ -26,13 +27,16 @@ export default function App(): React.JSX.Element {
     toggleTask,
     setView,
     view,
-    selectTaskById
+    selectTaskById,
+    deleteTask,
+    updateTask,
+    showToast
   } = useStore()
 
   useEffect(() => {
     refreshSidebar()
     refresh()
-    const offQuick = window.api.onQuickAdd(() => openQuickAdd())
+    const offQuick = window.api.onQuickAdd((text) => openQuickAdd(text ?? ''))
     const offOpen = window.api.onOpenTask((id) => selectTaskById(id))
     return () => {
       offQuick()
@@ -82,11 +86,30 @@ export default function App(): React.JSX.Element {
       if (e.key === ' ' && selected) {
         e.preventDefault()
         toggleTask(selected.id)
+        return
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
+        e.preventDefault()
+        deleteTask(selected.id)
+        return
+      }
+      if (mod && e.shiftKey && e.key.toLowerCase() === 't' && selected) {
+        e.preventDefault()
+        updateTask(selected.id, { scheduledDate: format(new Date(), 'yyyy-MM-dd') })
+        showToast('已安排到今天')
+        return
+      }
+      if (mod && e.shiftKey && e.key.toLowerCase() === 'm' && selected) {
+        e.preventDefault()
+        updateTask(selected.id, {
+          scheduledDate: format(addDays(new Date(), 1), 'yyyy-MM-dd')
+        })
+        showToast('已安排到明天')
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [selected, quickAddOpen, searchOpen])
+  }, [selected, quickAddOpen, searchOpen, view])
 
   return (
     <div className="app">

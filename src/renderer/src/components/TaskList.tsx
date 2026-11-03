@@ -1,10 +1,18 @@
-import { Plus, Sparkles } from 'lucide-react'
-import { useStore } from '../store'
+import { Plus, Sparkles, Trash2 } from 'lucide-react'
+import { useStore, type TaskFilter } from '../store'
 import { TaskRow } from './TaskRow'
 import { differenceInCalendarDays, format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { parseLocalDate } from '../lib/format'
 import type { Task } from '@shared/types'
+
+const FILTERS: { key: TaskFilter; label: string }[] = [
+  { key: 'all', label: '全部' },
+  { key: 'today', label: '今天' },
+  { key: 'overdue', label: '逾期' },
+  { key: 'high', label: '高优先级' },
+  { key: 'nodate', label: '无日期' }
+]
 
 function isOverdue(t: Task): boolean {
   const todayStart = new Date()
@@ -16,6 +24,21 @@ function isOverdue(t: Task): boolean {
     return new Date(t.dueAt).getTime() < todayStart.getTime()
   }
   return false
+}
+
+function matchFilter(t: Task, f: TaskFilter): boolean {
+  if (f === 'all') return true
+  if (f === 'high') return t.priority === 3
+  if (f === 'nodate') return !t.scheduledDate && !t.dueAt
+  if (f === 'overdue') return isOverdue(t)
+  if (f === 'today') {
+    const today = format(new Date(), 'yyyy-MM-dd')
+    return (
+      t.scheduledDate === today ||
+      (!!t.dueAt && format(new Date(t.dueAt), 'yyyy-MM-dd') === today)
+    )
+  }
+  return true
 }
 
 function dayKey(t: Task): string {
@@ -35,18 +58,20 @@ function dayTitle(key: string): string {
 }
 
 export function TaskList(): React.JSX.Element {
-  const { tasks, view, loading, openQuickAdd, selected } = useStore()
+  const { tasks, view, loading, openQuickAdd, selected, filter, setFilter, restoreTask, purgeTask } =
+    useStore()
 
+  const visible = tasks.filter((t) => matchFilter(t, filter))
   let sections: { key: string; label: string; tasks: Task[] }[] = []
 
   if (view.type === 'today') {
-    const overdue = tasks.filter(isOverdue)
-    const rest = tasks.filter((t) => !isOverdue(t))
+    const overdue = visible.filter(isOverdue)
+    const rest = visible.filter((t) => !isOverdue(t))
     if (overdue.length) sections.push({ key: 'overdue', label: '逾期', tasks: overdue })
     if (rest.length) sections.push({ key: 'today', label: '今天', tasks: rest })
   } else if (view.type === 'upcoming' || view.type === 'completed') {
     const map = new Map<string, Task[]>()
-    for (const t of tasks) {
+    for (const t of visible) {
       const key =
         view.type === 'completed' && t.completedAt
           ? format(new Date(t.completedAt), 'yyyy-MM-dd')
@@ -60,7 +85,7 @@ export function TaskList(): React.JSX.Element {
       tasks: list
     }))
   } else {
-    sections = tasks.length ? [{ key: 'all', label: '', tasks }] : []
+    sections = visible.length ? [{ key: 'all', label: '', tasks: visible }] : []
   }
 
   return (
@@ -69,48 +94,95 @@ export function TaskList(): React.JSX.Element {
         <div className="main-title">
           <h1>{view.title}</h1>
           <span className="main-count">
-            {view.type === 'completed' ? `${tasks.length} 条记录` : `${tasks.length} 项`}
+            {view.type === 'completed'
+              ? `${visible.length} 条记录`
+              : view.type === 'trash'
+                ? `${visible.length} 条已删除`
+                : `${visible.length} 项`}
           </span>
         </div>
-        <button className="ghost-btn" onClick={openQuickAdd}>
+        <button className="ghost-btn" onClick={() => openQuickAdd()}>
           <Plus size={15} />
           添加任务
         </button>
       </header>
 
-      <div className="task-scroll">
-        {loading && tasks.length === 0 && <div className="list-loading">加载中…</div>}
+      {!['trash', 'completed', 'calendar'].includes(view.type) && (
+        <div className="filter-bar">
+          {FILTERS.map((f) => (
+            <button
+              key={f.key}
+              className={`filter-chip ${filter === f.key ? 'active' : ''}`}
+              onClick={() => setFilter(f.key)}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      )}
 
-        {!loading && tasks.length === 0 && (
+      <div className="task-scroll">
+        {loading && visible.length === 0 && <div className="list-loading">加载中…</div>}
+
+        {!loading && visible.length === 0 && (
           <div className="empty">
             <div className="empty-icon">
               <Sparkles size={22} />
             </div>
             <div className="empty-title">{emptyTitle(view.type)}</div>
             <div className="empty-sub">按 Ctrl+Shift+Space 随时记下一条，或在下方输入</div>
-            <button className="primary-btn" onClick={openQuickAdd}>
-              <Plus size={15} /> 新建任务
-            </button>
+            {view.type !== 'trash' && (
+              <button className="primary-btn" onClick={() => openQuickAdd()}>
+                <Plus size={15} /> 新建任务
+              </button>
+            )}
           </div>
         )}
 
-        {sections.map((s) => (
-          <div key={s.key} className="task-section">
-            {s.label && (
-              <div className={`section-head ${s.key === 'overdue' ? 'overdue' : ''}`}>
-                <span>{s.label}</span>
-                <span className="section-count">{s.tasks.length}</span>
+        {view.type === 'trash' ? (
+          <div className="trash-list">
+            {visible.map((t) => (
+              <div key={t.id} className="trash-row">
+                <Trash2 size={14} className="trash-icon" />
+                <div className="trash-main">
+                  <div className="task-title">{t.title}</div>
+                  <div className="task-meta">
+                    删除于 {t.deletedAt ? new Date(t.deletedAt).toLocaleString('zh-CN') : '—'}
+                  </div>
+                </div>
+                <button className="mini-btn" onClick={() => restoreTask(t.id)}>
+                  恢复
+                </button>
+                <button
+                  className="danger-btn"
+                  onClick={() => {
+                    if (window.confirm(`彻底删除「${t.title}」？此操作不可撤销。`)) purgeTask(t.id)
+                  }}
+                >
+                  彻底删除
+                </button>
               </div>
-            )}
-            <div className="rows">
-              {s.tasks.map((t) => (
-                <TaskRow key={t.id} task={t} />
-              ))}
-            </div>
+            ))}
           </div>
-        ))}
+        ) : (
+          sections.map((s) => (
+            <div key={s.key} className="task-section">
+              {s.label && (
+                <div className={`section-head ${s.key === 'overdue' ? 'overdue' : ''}`}>
+                  <span>{s.label}</span>
+                  <span className="section-count">{s.tasks.length}</span>
+                </div>
+              )}
+              <div className="rows">
+                {s.tasks.map((t) => (
+                  <TaskRow key={t.id} task={t} />
+                ))}
+              </div>
+            </div>
+          ))
+        )}
 
-        {!loading && tasks.length === 0 && view.type !== 'completed' && (
+        {!loading && visible.length === 0 && !['completed', 'trash'].includes(view.type) && (
           <div className="list-footnote">任务会保存在本机，退出也不会丢</div>
         )}
       </div>
@@ -131,6 +203,8 @@ function emptyTitle(type: string): string {
       return '没有搁置的想法'
     case 'completed':
       return '还没有完成记录'
+    case 'trash':
+      return '回收站是空的'
     default:
       return '这里还没有任务'
   }

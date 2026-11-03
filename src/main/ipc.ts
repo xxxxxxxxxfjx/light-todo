@@ -21,6 +21,7 @@ export function registerIpc(): void {
   ipcMain.handle('tasks:setStatus', (_e, id: string, done: boolean) => db.setTaskStatus(id, done))
   ipcMain.handle('tasks:delete', (_e, id: string) => db.deleteTask(id))
   ipcMain.handle('tasks:restore', (_e, id: string) => db.restoreTask(id))
+  ipcMain.handle('tasks:purge', (_e, id: string) => db.purgeTask(id))
   ipcMain.handle('tasks:reorder', (_e, items: { id: string; sortOrder: number }[]) =>
     db.reorderTasks(items)
   )

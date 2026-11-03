@@ -9,7 +9,7 @@ import {
   screen
 } from 'electron'
 import { join } from 'node:path'
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { release } from 'node:os'
 import { initDb, closeDb, getDueReminders, markReminderSent } from './db'
 import { registerIpc } from './ipc'
@@ -34,6 +34,7 @@ const win11 = process.platform === 'win32' && Number(release().split('.')[2] ?? 
 const shotArg = process.argv.find((a) => a.startsWith('--screenshot'))
 const shotPath = shotArg?.includes('=') ? shotArg.split('=')[1] : process.env.LIGHTTODO_SHOT
 const qaArg = process.argv.find((a) => a.startsWith('--qa='))?.split('=')[1]
+const e2eArg = process.argv.find((a) => a.startsWith('--e2e='))?.split('=')[1]
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()
@@ -114,6 +115,13 @@ function createWindow(): void {
   mainWindow.once('ready-to-show', () => {
     console.log('COLD_START_MS', Date.now() - T0)
     mainWindow?.show()
+    if (process.argv.includes('--quick-add')) {
+      setTimeout(() => sendToRenderer('ui:quick-add', ''), 700)
+    }
+    if (e2eArg) {
+      setTimeout(() => runE2E(mainWindow!, e2eArg), 1200)
+      return
+    }
     if (shotPath) {
       setTimeout(async () => {
         try {
@@ -140,6 +148,19 @@ function createWindow(): void {
 
 function sendToRenderer(channel: string, ...args: unknown[]): void {
   mainWindow?.webContents.send(channel, ...args)
+}
+
+function sendToRendererWhenReady(channel: string, ...args: unknown[]): void {
+  const win = mainWindow
+  if (!win) return
+  const send = (): void => {
+    setTimeout(() => win.webContents.send(channel, ...args), 400)
+  }
+  if (win.webContents.isLoadingMainFrame()) {
+    win.webContents.once('did-finish-load', send)
+  } else {
+    send()
+  }
 }
 
 function quickAdd(): void {
@@ -199,6 +220,34 @@ async function runQa(win: BrowserWindow, mode: string): Promise<void> {
     `({ overlay: document.querySelectorAll('.overlay').length, qa: !!document.querySelector('.qa'), rows: document.querySelectorAll('.task-row').length, detail: !!document.querySelector('.detail-title') })`
   )
   console.log('QA_DIAG', mode, JSON.stringify(diag))
+}
+
+async function runE2E(win: BrowserWindow, file: string): Promise<void> {
+  const out = file.replace(/\.json$/, '.out.json')
+  const results: unknown[] = []
+  try {
+    const spec = JSON.parse(readFileSync(file, 'utf8')) as {
+      steps: { js?: string; wait?: number; shot?: string }[]
+    }
+    for (const step of spec.steps) {
+      if (step.shot) {
+        const image = await win.webContents.capturePage()
+        writeFileSync(step.shot, image.toPNG())
+        results.push({ shot: step.shot })
+      }
+      if (step.js) {
+        const r = await win.webContents.executeJavaScript(step.js)
+        results.push(r)
+      }
+      await new Promise((r) => setTimeout(r, step.wait ?? 350))
+    }
+    writeFileSync(out, JSON.stringify({ ok: true, results }, null, 2))
+  } catch (e) {
+    writeFileSync(out, JSON.stringify({ ok: false, error: String(e), results }, null, 2))
+  } finally {
+    isQuitting = true
+    app.quit()
+  }
 }
 
 function createTray(): void {
@@ -271,6 +320,55 @@ function registerShortcuts(): void {
   if (!ok) console.warn('GLOBAL_SHORTCUT_FAILED')
 }
 
+function handleProtocolUrl(url: string): void {
+  console.log('PROTOCOL_URL', url)
+  try {
+    const u = new URL(url)
+    if (u.protocol !== 'lighttodo:') return
+    showMain()
+    const text = u.searchParams.get('text') ?? ''
+    if (u.hostname === 'add') {
+      sendToRendererWhenReady('ui:quick-add', text)
+    }
+  } catch (e) {
+    console.warn('PROTOCOL_PARSE_FAILED', url, e)
+  }
+}
+
+function setupIntegration(): void {
+  try {
+    if (process.defaultApp && process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient('lighttodo', process.execPath, [process.argv[1]])
+    } else {
+      app.setAsDefaultProtocolClient('lighttodo')
+    }
+  } catch (e) {
+    console.warn('PROTOCOL_REGISTER_FAILED', e)
+  }
+
+  if (app.isPackaged) {
+    try {
+      app.setJumpList([
+        {
+          type: 'tasks',
+          items: [
+            { type: 'task', title: '新建任务', program: process.execPath, args: '--quick-add' }
+          ]
+        }
+      ])
+    } catch (e) {
+      console.warn('JUMPLIST_FAILED', e)
+    }
+  }
+
+  const startupUrl = process.argv.find((a) => a.startsWith('lighttodo://'))
+  console.log('STARTUP_ARGV', JSON.stringify(process.argv))
+  if (startupUrl) {
+    console.log('STARTUP_URL', startupUrl)
+    setTimeout(() => handleProtocolUrl(startupUrl), 1500)
+  }
+}
+
 app.whenReady().then(() => {
   app.setAppUserModelId('com.lighttodo.app')
   initDb(resolveDataDir())
@@ -279,6 +377,7 @@ app.whenReady().then(() => {
   createWindow()
   createTray()
   registerShortcuts()
+  setupIntegration()
   startReminderLoop()
   // 备份放到窗口显示之后，不阻塞冷启动
   setTimeout(() => backupNow('startup'), 3000)
@@ -289,7 +388,11 @@ app.whenReady().then(() => {
   })
 })
 
-app.on('second-instance', () => showMain())
+app.on('second-instance', (_e, argv) => {
+  const url = argv.find((a) => a.startsWith('lighttodo://'))
+  if (url) handleProtocolUrl(url)
+  else showMain()
+})
 
 app.on('window-all-closed', () => {
   // Tray app: keep running until explicit quit.

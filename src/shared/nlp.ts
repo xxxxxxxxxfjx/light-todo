@@ -143,9 +143,9 @@ export function parseQuickAdd(input: string, now: Date = new Date()): ParsedQuic
     }
   }
 
-  // 每工作日
+  // 每工作日 / 工作日
   if (!rrule) {
-    m = take(/每(?:个)?工作日/)
+    m = take(/(?:每(?:个)?)?工作日/)
     if (m) {
       repeatWeekdays = [1, 2, 3, 4, 5]
       rrule = 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR'

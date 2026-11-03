@@ -57,7 +57,7 @@ export function CalendarView(): React.JSX.Element {
           <button className="icon-btn" onClick={() => setCursor(addMonths(cursor, 1))}>
             <ChevronRight size={16} />
           </button>
-          <button className="ghost-btn" onClick={openQuickAdd}>
+          <button className="ghost-btn" onClick={() => openQuickAdd()}>
             添加任务
           </button>
         </div>

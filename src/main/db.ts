@@ -294,6 +294,11 @@ export function listTasks(opts: {
       order = 't.completed_at DESC'
       limit = opts.limit ?? 300
       break
+    case 'trash':
+      where = 't.deleted_at IS NOT NULL AND t.parent_id IS NULL'
+      order = 't.deleted_at DESC'
+      limit = opts.limit ?? 300
+      break
     case 'calendar':
       where += ' AND t.status = 0'
       break
@@ -565,6 +570,13 @@ export function purgeTrash(): void {
   conn().prepare("DELETE FROM tasks WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now','-30 days')").run()
 }
 
+export function purgeTask(id: string): void {
+  const c = conn()
+  c.prepare('DELETE FROM task_tags WHERE task_id = ?').run(id)
+  c.prepare('DELETE FROM tasks WHERE parent_id = ?').run(id)
+  c.prepare('DELETE FROM tasks WHERE id = ?').run(id)
+}
+
 export function reorderTasks(items: { id: string; sortOrder: number }[]): void {
   const stmt = conn().prepare('UPDATE tasks SET sort_order = ?, updated_at = ? WHERE id = ?')
   const now = nowIso()
@@ -728,7 +740,8 @@ export function getSidebar(): SidebarData {
     someday: count(
       'SELECT COUNT(*) AS c FROM tasks WHERE deleted_at IS NULL AND parent_id IS NULL AND status=0 AND scheduled_date IS NULL AND due_at IS NULL'
     ),
-    completed: count('SELECT COUNT(*) AS c FROM tasks WHERE deleted_at IS NULL AND parent_id IS NULL AND status=1')
+    completed: count('SELECT COUNT(*) AS c FROM tasks WHERE deleted_at IS NULL AND parent_id IS NULL AND status=1'),
+    trash: count('SELECT COUNT(*) AS c FROM tasks WHERE deleted_at IS NOT NULL AND parent_id IS NULL')
   }
 
   return { folders: getFolders(), lists: getLists(), tags: getTags(), counts }

@@ -22,6 +22,7 @@ const api = {
     setStatus: (id: string, done: boolean) => ipcRenderer.invoke('tasks:setStatus', id, done),
     remove: (id: string) => ipcRenderer.invoke('tasks:delete', id),
     restore: (id: string) => ipcRenderer.invoke('tasks:restore', id),
+    purge: (id: string) => ipcRenderer.invoke('tasks:purge', id),
     reorder: (items: { id: string; sortOrder: number }[]) =>
       ipcRenderer.invoke('tasks:reorder', items)
   },
@@ -55,8 +56,8 @@ const api = {
     getLoginItem: () => ipcRenderer.invoke('app:getLoginItem'),
     setLoginItem: (enabled: boolean) => ipcRenderer.invoke('app:setLoginItem', enabled)
   },
-  onQuickAdd: (cb: () => void) => {
-    const listener = (): void => cb()
+  onQuickAdd: (cb: (text?: string) => void) => {
+    const listener = (_e: unknown, text?: string): void => cb(text)
     ipcRenderer.on('ui:quick-add', listener)
     return (): void => {
       ipcRenderer.removeListener('ui:quick-add', listener)
