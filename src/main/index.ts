@@ -59,10 +59,17 @@ function iconPath(): string {
 }
 
 function showMain(): void {
-  if (!mainWindow) return
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()
+  // Windows 会阻止后台进程抢前台：临时置顶再取消，确保窗口真的到最前
+  mainWindow.setAlwaysOnTop(true)
   mainWindow.focus()
+  mainWindow.moveTop()
+  mainWindow.setAlwaysOnTop(false)
 }
 
 function createWindow(): void {
@@ -158,6 +165,24 @@ async function runQa(win: BrowserWindow, mode: string): Promise<void> {
     settings: `document.querySelector('.sb-foot .nav-item')?.click()`,
     calendar: `[...document.querySelectorAll('.nav-item')].find((el) => el.textContent?.includes('日历'))?.click()`,
     all: `[...document.querySelectorAll('.nav-item')].find((el) => el.textContent?.trim().startsWith('全部'))?.click()`,
+    towork: `[...document.querySelectorAll('.list-item')].find((el) => el.textContent?.includes('工作'))?.click()`,
+    addwork: `(() => {
+      const btn = [...document.querySelectorAll('.list-item')].find((el) => el.textContent?.includes('工作'));
+      if (!btn) return 'NO_LIST';
+      btn.click();
+      setTimeout(() => {
+        document.querySelector('.new-task')?.click();
+        setTimeout(() => {
+          const i = document.querySelector('.qa-input');
+          if (!i) return 'NO_INPUT';
+          const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+          setter.call(i, '工作清单验证任务');
+          i.dispatchEvent(new Event('input', { bubbles: true }));
+          setTimeout(() => { document.querySelector('.qa-submit')?.click(); }, 200);
+        }, 300);
+      }, 300);
+      return 'OK';
+    })()`,
     search: `document.querySelector('.titlebar-search')?.click()`,
     searchquery: `document.querySelector('.titlebar-search')?.click(); setTimeout(() => {
       const i = document.querySelector('.search-input-row input');

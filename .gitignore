@@ -33,3 +33,5 @@ dist/
 
 .pkgv/
 
+.pkgfix/
+.qa-bugfix/

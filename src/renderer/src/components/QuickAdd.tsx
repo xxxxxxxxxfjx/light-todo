@@ -21,7 +21,7 @@ function Chip({
 }
 
 export function QuickAdd(): React.JSX.Element {
-  const { closeQuickAdd, createTask, sidebar, refreshSidebar, showToast } = useStore()
+  const { closeQuickAdd, createTask, sidebar, refreshSidebar, showToast, view } = useStore()
   const [text, setText] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
   const parsed = useMemo(() => parseQuickAdd(text), [text])
@@ -33,6 +33,8 @@ export function QuickAdd(): React.JSX.Element {
   const submit = async (keepOpen = false): Promise<void> => {
     const title = parsed.title.trim()
     if (!title) return
+
+    // 清单归属：#清单名 优先，否则用当前所在的清单视图，否则收件箱
     let listId: string | null = null
     if (parsed.listName) {
       const found = sidebar.lists.find((l) => l.name === parsed.listName)
@@ -43,11 +45,22 @@ export function QuickAdd(): React.JSX.Element {
         listId = created.id
         await refreshSidebar()
       }
+    } else if (view.type === 'list' && view.listId) {
+      listId = view.listId
     }
+
+    // 日期默认：当前在"今天"视图且没写日期 → 今天；"最近 7 天" → 今天
+    let scheduledDate = parsed.scheduledDate
+    if (!scheduledDate && !parsed.dueAt) {
+      if (view.type === 'today' || view.type === 'upcoming') {
+        scheduledDate = format(new Date(), 'yyyy-MM-dd')
+      }
+    }
+
     await createTask({
       title,
       listId,
-      scheduledDate: parsed.scheduledDate,
+      scheduledDate,
       dueAt: parsed.dueAt,
       dueAllDay: parsed.dueAllDay,
       rrule: parsed.rrule,
@@ -55,7 +68,13 @@ export function QuickAdd(): React.JSX.Element {
       priority: parsed.priority,
       tagNames: parsed.tagNames
     })
-    showToast(parsed.scheduledDate ? '已添加到日程' : '已添加到收件箱')
+    showToast(
+      parsed.listName || view.type === 'list'
+        ? `已添加到${parsed.listName ?? view.title}`
+        : scheduledDate
+          ? '已添加到日程'
+          : '已添加到收件箱'
+    )
     if (keepOpen) {
       setText('')
       ref.current?.focus()
