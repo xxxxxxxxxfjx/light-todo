@@ -11,7 +11,7 @@ import {
 import { join } from 'node:path'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { release } from 'node:os'
-import { initDb, closeDb, getDueReminders, markReminderSent } from './db'
+import { initDb, closeDb, getDueReminders, getSetting, markReminderSent } from './db'
 import { registerIpc } from './ipc'
 import { backupNow, registerDataIpc } from './data'
 
@@ -114,7 +114,8 @@ function createWindow(): void {
 
   mainWindow.once('ready-to-show', () => {
     console.log('COLD_START_MS', Date.now() - T0)
-    mainWindow?.show()
+    const hiddenStart = process.argv.includes('--hidden') && !e2eArg && !shotPath
+    if (!hiddenStart) mainWindow?.show()
     if (process.argv.includes('--quick-add')) {
       setTimeout(() => sendToRenderer('ui:quick-add', ''), 700)
     }
@@ -277,6 +278,11 @@ function createTray(): void {
 
 function startReminderLoop(): void {
   const tick = (): void => {
+    try {
+      if (getSetting('reminders_enabled') === '0') return
+    } catch {
+      /* ignore */
+    }
     let due: ReturnType<typeof getDueReminders>
     try {
       due = getDueReminders(new Date().toISOString())

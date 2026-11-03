@@ -42,3 +42,4 @@ dist/
 .e2e-flows/
 .e2e-stress/
 
+.qa-*/

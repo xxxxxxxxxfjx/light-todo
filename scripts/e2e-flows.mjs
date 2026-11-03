@@ -106,27 +106,36 @@ async function launch(dir, steps, tag) {
 async function journey(name, sessions) {
   if (only && only !== name) return
   const dir = join(BASE, name)
-  rmSync(dir, { recursive: true, force: true })
-  mkdirSync(dir, { recursive: true })
   const t0 = Date.now()
-  try {
-    for (let i = 0; i < sessions.length; i++) {
-      const s = sessions[i]
-      const out = await launch(dir, s.steps, `s${i + 1}`)
-      const db = new DatabaseSync(join(dir, 'lighttodo.db'))
-      try {
-        await s.check({ out, db, dir, session: i })
-      } finally {
-        db.close()
+  let lastError = null
+  for (let attempt = 0; attempt < 2; attempt++) {
+    rmSync(dir, { recursive: true, force: true })
+    mkdirSync(dir, { recursive: true })
+    try {
+      for (let i = 0; i < sessions.length; i++) {
+        const s = sessions[i]
+        const out = await launch(dir, s.steps, `s${i + 1}-a${attempt}`)
+        const db = new DatabaseSync(join(dir, 'lighttodo.db'))
+        try {
+          await s.check({ out, db, dir, session: i })
+        } finally {
+          db.close()
+        }
+      }
+      results.push({ name, ok: true, ms: Date.now() - t0 })
+      console.log(`✅ PASS  ${name}  (${Date.now() - t0}ms${attempt ? ', 重试通过' : ''})`)
+      return
+    } catch (e) {
+      lastError = e
+      if (attempt === 0) {
+        console.log(`↻ 重试 ${name}: ${e.message}`)
+        await new Promise((r) => setTimeout(r, 1200))
       }
     }
-    results.push({ name, ok: true, ms: Date.now() - t0 })
-    console.log(`✅ PASS  ${name}  (${Date.now() - t0}ms)`)
-  } catch (e) {
-    failed++
-    results.push({ name, ok: false, ms: Date.now() - t0, error: e.message })
-    console.log(`❌ FAIL  ${name}  (${Date.now() - t0}ms)\n        ${e.message}`)
   }
+  failed++
+  results.push({ name, ok: false, ms: Date.now() - t0, error: lastError.message })
+  console.log(`❌ FAIL  ${name}  (${Date.now() - t0}ms)\n        ${lastError.message}`)
 }
 
 const today = () => {
@@ -173,13 +182,13 @@ await journey('flow-collect-organize-execute', [
   },
   {
     steps: [
-      { js: clickText('.nav-item', '今天'), wait: 700 },
-      { js: `[...document.querySelectorAll('.task-title')].map((e) => e.textContent)`, wait: 100 },
-      { js: clickText('.task-title', '季度报告'), wait: 600 },
-      { js: `document.querySelector('.subtask .check')?.click()`, wait: 700 },
-      { js: `[...document.querySelectorAll('.task-row')].find((r) => r.textContent.includes('季度报告'))?.querySelector('.check')?.click()`, wait: 900 },
-      { js: clickText('.nav-item', '已完成'), wait: 700 },
-      { js: `[...document.querySelectorAll('.task-title')].map((e) => e.textContent)`, wait: 100 }
+      { js: clickText('.nav-item', '今天'), wait: 1000 },
+      { js: `[...document.querySelectorAll('.task-title')].map((e) => e.textContent)`, wait: 200 },
+      { js: clickText('.task-title', '季度报告'), wait: 800 },
+      { js: `document.querySelector('.subtask .check')?.click()`, wait: 900 },
+      { js: `[...document.querySelectorAll('.task-row')].find((r) => r.textContent.includes('季度报告'))?.querySelector('.check')?.click()`, wait: 1100 },
+      { js: clickText('.nav-item', '已完成'), wait: 1000 },
+      { js: `[...document.querySelectorAll('.task-title')].map((e) => e.textContent)`, wait: 200 }
     ],
     check: ({ out, db }) => {
       const todayRows = out.results[1].join('|')

@@ -276,7 +276,7 @@ export function listTasks(opts: {
       break
     case 'today':
       where +=
-        ' AND t.status = 0 AND ((t.scheduled_date IS NOT NULL AND t.scheduled_date <= ?) OR (t.due_at IS NOT NULL AND t.due_at < ?))'
+        ' AND t.status = 0 AND ((t.scheduled_date IS NOT NULL AND t.scheduled_date <= ?) OR (t.due_at IS NOT NULL AND t.due_at < ?) OR (t.scheduled_date IS NULL AND t.due_at IS NULL AND t.list_id IS NULL))'
       params.push(today, tomorrowStart)
       order = `CASE WHEN (t.due_at IS NOT NULL AND t.due_at < '${now.toISOString()}') OR (t.scheduled_date IS NOT NULL AND t.scheduled_date < '${today}') THEN 0 ELSE 1 END, t.sort_order ASC, t.created_at DESC`
       break
@@ -718,8 +718,36 @@ export function createTag(name: string, color?: string): Tag {
   return { id, name, color: color ?? null }
 }
 
+export function updateTag(id: string, patch: { name?: string; color?: string | null }): Tag {
+  const cur = conn().prepare('SELECT * FROM tags WHERE id = ?').get(id) as
+    | Record<string, unknown>
+    | undefined
+  if (!cur) throw new Error('标签不存在')
+  const name = patch.name?.trim() || (cur.name as string)
+  const color = patch.color === undefined ? ((cur.color as string) ?? null) : patch.color
+  conn().prepare('UPDATE tags SET name = ?, color = ? WHERE id = ?').run(name, color, id)
+  return { id, name, color }
+}
+
 export function deleteTag(id: string): void {
   conn().prepare('DELETE FROM tags WHERE id = ?').run(id)
+}
+
+export function clearCompleted(): number {
+  const c = conn()
+  const ids = c
+    .prepare('SELECT id FROM tasks WHERE status = 1 AND deleted_at IS NULL')
+    .all() as { id: string }[]
+  if (!ids.length) return 0
+  const delTag = c.prepare('DELETE FROM task_tags WHERE task_id = ?')
+  const delSub = c.prepare('DELETE FROM tasks WHERE parent_id = ?')
+  const del = c.prepare('DELETE FROM tasks WHERE id = ?')
+  for (const { id } of ids) {
+    delTag.run(id)
+    delSub.run(id)
+    del.run(id)
+  }
+  return ids.length
 }
 
 export function getSidebar(): SidebarData {
@@ -737,7 +765,7 @@ export function getSidebar(): SidebarData {
   const counts: Record<string, number> = {
     inbox: count('SELECT COUNT(*) AS c FROM tasks WHERE deleted_at IS NULL AND parent_id IS NULL AND status=0 AND list_id IS NULL'),
     today: count(
-      'SELECT COUNT(*) AS c FROM tasks WHERE deleted_at IS NULL AND parent_id IS NULL AND status=0 AND ((scheduled_date IS NOT NULL AND scheduled_date <= ?) OR (due_at IS NOT NULL AND due_at < ?))',
+      'SELECT COUNT(*) AS c FROM tasks WHERE deleted_at IS NULL AND parent_id IS NULL AND status=0 AND ((scheduled_date IS NOT NULL AND scheduled_date <= ?) OR (due_at IS NOT NULL AND due_at < ?) OR (scheduled_date IS NULL AND due_at IS NULL AND list_id IS NULL))',
       today,
       tomorrowStart
     ),

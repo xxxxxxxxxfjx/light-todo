@@ -37,6 +37,9 @@ export function registerIpc(): void {
   ipcMain.handle('folders:create', (_e, name: string) => db.createFolder(name))
 
   ipcMain.handle('tags:create', (_e, name: string, color?: string) => db.createTag(name, color))
+  ipcMain.handle('tags:update', (_e, id: string, patch: { name?: string; color?: string | null }) =>
+    db.updateTag(id, patch)
+  )
   ipcMain.handle('tags:delete', (_e, id: string) => db.deleteTag(id))
 
   ipcMain.handle('search:query', (_e, q: string) => db.searchTasks(q))

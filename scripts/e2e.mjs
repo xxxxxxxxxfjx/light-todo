@@ -3,6 +3,7 @@
  * 运行：node scripts/e2e.mjs [scenarioName]
  */
 import { spawn } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -10,6 +11,7 @@ import { DatabaseSync } from 'node:sqlite'
 const ROOT = process.cwd()
 const EXE = join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe')
 const E2E_DIR = join(ROOT, '.e2e')
+const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
 
 const only = process.argv[2]
 
@@ -49,6 +51,7 @@ const rows = `[...document.querySelectorAll('.task-title')].map((e) => e.textCon
 
 async function runScenario(name, steps, check, opts = {}) {
   if (only && only !== name) return
+  if (opts.setup) await opts.setup()
   const dir = join(E2E_DIR, name)
   rmSync(dir, { recursive: true, force: true })
   mkdirSync(dir, { recursive: true })
@@ -99,6 +102,14 @@ async function runScenario(name, steps, check, opts = {}) {
     const ms = Date.now() - started
     results.push({ name, ok: false, ms, error: String(e.message ?? e) })
     console.log(`❌ FAIL  ${name}  (${ms}ms)\n        ${e.message ?? e}`)
+  } finally {
+    if (opts.teardown) {
+      try {
+        await opts.teardown()
+      } catch {
+        /* ignore */
+      }
+    }
   }
 }
 
@@ -420,6 +431,180 @@ await runScenario(
     assert(v.includes('协议测试'), 'lighttodo:// 协议没有把文本带进快速添加，实际: ' + v)
   },
   { args: ['lighttodo://add?text=协议测试'] }
+)
+
+await runScenario(
+  'no-inbox-nav',
+  [
+    { js: `[...document.querySelectorAll('.nav-item')].map((e) => e.textContent.trim())`, wait: 100 },
+    { js: clickText('.nav-item', '全部'), wait: 600 },
+    { js: `document.querySelector('.new-task').click()`, wait: 300 },
+    { js: setText('.qa-input', '未安排任务'), wait: 200 },
+    { js: `document.querySelector('.qa-submit').click()`, wait: 700 },
+    { js: clickText('.nav-item', '今天'), wait: 700 },
+    { js: rows, wait: 100 }
+  ],
+  ({ out, db }) => {
+    const nav = out.results[0].join('|')
+    assert(!nav.includes('收件箱'), '侧边栏不应再有收件箱: ' + nav)
+    assert(out.results.at(-1).includes('未安排任务'), '未安排任务应出现在今天视图')
+    const t = one(db, `SELECT * FROM tasks WHERE title='未安排任务'`)
+    assert(t.list_id === null && t.scheduled_date === null, '任务应为未分类未排期')
+  }
+)
+
+await runScenario(
+  'calendar-add-day',
+  [
+    { js: clickText('.nav-item', '日历'), wait: 800 },
+    {
+      js: `(() => {
+        const cell = [...document.querySelectorAll('.cal-cell')].find((c) => !c.classList.contains('dim') && c.querySelector('.cal-date')?.textContent === '15');
+        if (!cell) return 'NO_CELL';
+        cell.click();
+        return 'CLICKED';
+      })()`,
+      wait: 500
+    },
+    { js: `document.querySelector('.qa-input')?.value ?? ''`, wait: 100 },
+    { js: setText('.qa-input', '日历点选任务'), wait: 200 },
+    { js: `document.querySelector('.qa-submit')?.click()`, wait: 800 }
+  ],
+  ({ db }) => {
+    const t = one(db, `SELECT * FROM tasks WHERE title='日历点选任务'`)
+    assert(!!t, '任务未创建')
+    const now = new Date()
+    const expect = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-15`
+    assert(t.scheduled_date === expect, `应排在 ${expect}，实际 ${t.scheduled_date}`)
+  }
+)
+
+await runScenario(
+  'detail-complete-calendar',
+  [
+    { js: `document.querySelector('.new-task').click()`, wait: 300 },
+    { js: setText('.qa-input', '日历完成测试'), wait: 200 },
+    { js: `document.querySelector('.qa-submit').click()`, wait: 700 },
+    { js: clickText('.nav-item', '日历'), wait: 800 },
+    { js: clickText('.cal-item', '日历完成测试'), wait: 700 },
+    { js: `document.querySelector('.detail-title-row .check.big')?.click()`, wait: 1000 },
+    { js: `[...document.querySelectorAll('.cal-item')].map((e) => e.textContent)`, wait: 100 }
+  ],
+  ({ out, db }) => {
+    const items = out.results.at(-1).join('|')
+    assert(!items.includes('日历完成测试'), '完成后日历不应再显示: ' + items)
+    const t = one(db, `SELECT * FROM tasks WHERE title='日历完成测试'`)
+    assert(t.status === 1, '任务应已完成')
+  }
+)
+
+await runScenario(
+  'batch-delete',
+  [
+    { js: `document.querySelector('.new-task').click()`, wait: 300 },
+    { js: setText('.qa-input', '批量A'), wait: 200 },
+    { js: `document.querySelector('.qa-submit').click()`, wait: 600 },
+    { js: `document.querySelector('.new-task').click()`, wait: 300 },
+    { js: setText('.qa-input', '批量B'), wait: 200 },
+    { js: `document.querySelector('.qa-submit').click()`, wait: 600 },
+    { js: clickText('.head-actions .ghost-btn', '多选'), wait: 400 },
+    { js: clickText('.task-row', '批量A'), wait: 200 },
+    { js: clickText('.task-row', '批量B'), wait: 200 },
+    { js: `document.querySelector('.bulk-bar')?.textContent ?? ''`, wait: 100 },
+    { js: `[...document.querySelectorAll('.bulk-bar .mini-btn')].find((b) => b.textContent.trim() === '删除')?.click()`, wait: 1000 }
+  ],
+  ({ out, db }) => {
+    assert(String(out.results[9]).includes('已选 2 项'), '批量栏应显示已选 2 项: ' + out.results[9])
+    const a = one(db, `SELECT * FROM tasks WHERE title='批量A'`)
+    const b = one(db, `SELECT * FROM tasks WHERE title='批量B'`)
+    assert(a && a.deleted_at, '批量A 应被删除')
+    assert(b && b.deleted_at, '批量B 应被删除')
+  }
+)
+
+await runScenario(
+  'settings-tags',
+  [
+    { js: `document.querySelector('.sb-foot .nav-item').click()`, wait: 600 },
+    { js: setText('.tag-add input', '旅行', 'input'), wait: 300 },
+    { js: clickText('.tag-add .mini-btn', '添加'), wait: 1100 },
+    { js: `[...document.querySelectorAll('.tag-manage-row')].map((e) => e.textContent)`, wait: 100 },
+    {
+      js: `(() => { const row = [...document.querySelectorAll('.tag-manage-row')].find((r) => r.textContent.includes('旅行')); row?.querySelector('.mini-btn')?.click(); return row ? 'OK' : 'NO_ROW' })()`,
+      wait: 600
+    },
+    { js: setText('.tag-manage-row .inline-input', '出差', 'input'), wait: 300 },
+    { js: `document.querySelector('.tag-manage-row .inline-input')?.blur()`, wait: 1300 },
+    { js: `(() => { window.confirm = () => true; return 'OK' })()`, wait: 50 },
+    {
+      js: `(() => { const row = [...document.querySelectorAll('.tag-manage-row')].find((r) => r.textContent.includes('出差')); row?.querySelector('.mini-btn.danger')?.click(); return row ? 'OK' : 'NO_ROW' })()`,
+      wait: 1100
+    }
+  ],
+  ({ db }) => {
+    const tags = q(db, 'SELECT name FROM tags')
+    assert(!tags.some((t) => t.name === '旅行'), '旅行应已改名')
+    assert(!tags.some((t) => t.name === '出差'), '出差应已删除')
+  }
+)
+
+await runScenario(
+  'theme-dark',
+  [
+    { js: `document.querySelector('.sb-foot .nav-item').click()`, wait: 500 },
+    { js: clickText('.settings .seg', '深色'), wait: 400 },
+    { js: `document.documentElement.dataset.theme ?? ''`, wait: 100 }
+  ],
+  ({ out }) => {
+    assert(out.results.at(-1) === 'dark', '主题应切换为 dark，实际 ' + out.results.at(-1))
+  }
+)
+
+await runScenario(
+  'settings-clear-completed',
+  [
+    { js: `document.querySelector('.task-row .check')?.click()`, wait: 800 },
+    { js: `document.querySelector('.sb-foot .nav-item').click()`, wait: 500 },
+    { js: `(() => { window.confirm = () => true; return 'OK' })()`, wait: 50 },
+    { js: clickText('.set-row .mini-btn', '清空已完成'), wait: 1000 }
+  ],
+  ({ db }) => {
+    const done = q(db, 'SELECT * FROM tasks WHERE status = 1')
+    assert(done.length === 0, `清空后不应有已完成任务，实际 ${done.length}`)
+  }
+)
+
+await runScenario(
+  'autostart-read',
+  [
+    { js: `document.querySelector('.sb-foot .nav-item').click()`, wait: 700 },
+    {
+      js: `(() => {
+        const row = [...document.querySelectorAll('.set-row')].find((r) => r.textContent.includes('开机自启'));
+        return row?.querySelector('input[type=checkbox]')?.checked;
+      })()`,
+      wait: 100
+    }
+  ],
+  ({ out }) => {
+    assert(out.results.at(-1) === true, '应读取到已注册的开机自启，实际 ' + out.results.at(-1))
+  },
+  {
+    setup: () => {
+      execFileSync(
+        'reg',
+        ['add', RUN_KEY, '/v', 'LightTodo', '/t', 'REG_SZ', '/d', '"C:\\Windows\\notepad.exe"', '/f'],
+        { windowsHide: true }
+      )
+    },
+    teardown: () => {
+      try {
+        execFileSync('reg', ['delete', RUN_KEY, '/v', 'LightTodo', '/f'], { windowsHide: true })
+      } catch {
+        /* ignore */
+      }
+    }
+  }
 )
 
 // 持久化：两次启动同一数据目录

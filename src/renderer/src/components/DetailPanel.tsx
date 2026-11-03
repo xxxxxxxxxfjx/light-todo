@@ -20,8 +20,16 @@ function Field({
 }
 
 export function DetailPanel(): React.JSX.Element {
-  const { selected, sidebar, updateTask, deleteTask, selectTask, refresh, refreshSidebar } =
-    useStore()
+  const {
+    selected,
+    sidebar,
+    updateTask,
+    deleteTask,
+    selectTask,
+    toggleTask,
+    refresh,
+    refreshSidebar
+  } = useStore()
   const [title, setTitle] = useState('')
   const [notes, setNotes] = useState('')
   const notesRef = useRef<HTMLTextAreaElement>(null)
@@ -77,9 +85,7 @@ export function DetailPanel(): React.JSX.Element {
         <div className="detail-title-row">
           <button
             className={`check big ${task.status === 1 ? 'checked' : ''}`}
-            onClick={() => {
-              window.api.tasks.setStatus(task.id, task.status !== 1).then(() => selectTask(task.id))
-            }}
+            onClick={() => toggleTask(task.id)}
           >
             <Check size={13} strokeWidth={3} />
           </button>
@@ -104,7 +110,7 @@ export function DetailPanel(): React.JSX.Element {
               value={task.listId ?? ''}
               onChange={(e) => updateTask(task.id, { listId: e.target.value || null })}
             >
-              <option value="">收件箱</option>
+              <option value="">未分类</option>
               {sidebar.lists.map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.name}
@@ -175,6 +181,12 @@ export function DetailPanel(): React.JSX.Element {
               value={tagText}
               onChange={(e) => setTagText(e.target.value)}
               onBlur={saveTags}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  ;(e.target as HTMLInputElement).blur()
+                }
+              }}
             />
           </Field>
         </div>

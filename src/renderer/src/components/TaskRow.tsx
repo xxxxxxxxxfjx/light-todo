@@ -4,30 +4,48 @@ import { dueLabel } from '../lib/format'
 import type { Task } from '@shared/types'
 
 export function TaskRow({ task }: { task: Task }): React.JSX.Element {
-  const { selected, selectTask, toggleTask, sidebar, view } = useStore()
+  const {
+    selected,
+    selectTask,
+    toggleTask,
+    sidebar,
+    view,
+    selectMode,
+    selectedIds,
+    toggleSelectId
+  } = useStore()
   const due = dueLabel(task)
   const list = sidebar.lists.find((l) => l.id === task.listId)
-  const active = selected?.id === task.id
+  const checked = selectedIds.includes(task.id)
+  const active = !selectMode && selected?.id === task.id
 
   return (
     <div
-      className={`task-row ${active ? 'selected' : ''} ${task.status === 1 ? 'done' : ''}`}
-      onClick={() => selectTask(task.id)}
-      onDoubleClick={() => toggleTask(task.id)}
+      className={`task-row ${active ? 'selected' : ''} ${checked ? 'picked' : ''} ${
+        task.status === 1 ? 'done' : ''
+      }`}
+      onClick={() => (selectMode ? toggleSelectId(task.id) : selectTask(task.id))}
+      onDoubleClick={() => !selectMode && toggleTask(task.id)}
       role="button"
       tabIndex={0}
     >
       <span className="prio" data-p={task.priority} />
-      <button
-        className={`check ${task.status === 1 ? 'checked' : ''}`}
-        onClick={(e) => {
-          e.stopPropagation()
-          toggleTask(task.id)
-        }}
-        aria-label={task.status === 1 ? '标记未完成' : '完成'}
-      >
-        <Check size={12} strokeWidth={3} />
-      </button>
+      {selectMode ? (
+        <span className={`select-box ${checked ? 'checked' : ''}`} aria-hidden>
+          {checked && <Check size={11} strokeWidth={3} />}
+        </span>
+      ) : (
+        <button
+          className={`check ${task.status === 1 ? 'checked' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation()
+            toggleTask(task.id)
+          }}
+          aria-label={task.status === 1 ? '标记未完成' : '完成'}
+        >
+          <Check size={12} strokeWidth={3} />
+        </button>
+      )}
 
       <div className="task-main">
         <div className="task-title-line">

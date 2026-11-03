@@ -21,8 +21,16 @@ function Chip({
 }
 
 export function QuickAdd(): React.JSX.Element {
-  const { closeQuickAdd, createTask, sidebar, refreshSidebar, showToast, view, quickAddInitial } =
-    useStore()
+  const {
+    closeQuickAdd,
+    createTask,
+    sidebar,
+    refreshSidebar,
+    showToast,
+    view,
+    quickAddInitial,
+    quickAddDate
+  } = useStore()
   const [text, setText] = useState(quickAddInitial)
   const ref = useRef<HTMLTextAreaElement>(null)
   const parsed = useMemo(() => parseQuickAdd(text), [text])
@@ -50,8 +58,8 @@ export function QuickAdd(): React.JSX.Element {
       listId = view.listId
     }
 
-    // 日期默认：当前在"今天"视图且没写日期 → 今天；"最近 7 天" → 今天
-    let scheduledDate = parsed.scheduledDate
+    // 日期默认：日历点选的那天 > NLP 解析 > 当前视图约定
+    let scheduledDate = parsed.scheduledDate ?? quickAddDate
     if (!scheduledDate && !parsed.dueAt) {
       if (view.type === 'today' || view.type === 'upcoming') {
         scheduledDate = format(new Date(), 'yyyy-MM-dd')
@@ -73,8 +81,8 @@ export function QuickAdd(): React.JSX.Element {
       parsed.listName || view.type === 'list'
         ? `已添加到${parsed.listName ?? view.title}`
         : scheduledDate
-          ? '已添加到日程'
-          : '已添加到收件箱'
+          ? `已添加到 ${dateLabel(scheduledDate)}`
+          : '已添加到今天'
     )
     if (keepOpen) {
       setText('')
@@ -108,10 +116,10 @@ export function QuickAdd(): React.JSX.Element {
           </button>
         </div>
 
-        {(parsed.scheduledDate || parsed.dueAt || parsed.priority || parsed.listName || parsed.tagNames.length > 0 || parsed.rrule) && (
+        {(parsed.scheduledDate || parsed.dueAt || parsed.priority || parsed.listName || parsed.tagNames.length > 0 || parsed.rrule || quickAddDate) && (
           <div className="qa-chips">
-            {parsed.scheduledDate && (
-              <Chip icon={CalendarDays}>{dateLabel(parsed.scheduledDate)}</Chip>
+            {(parsed.scheduledDate || quickAddDate) && (
+              <Chip icon={CalendarDays}>{dateLabel(parsed.scheduledDate ?? quickAddDate!)}</Chip>
             )}
             {parsed.dueAt && <Chip icon={Clock}>{format(new Date(parsed.dueAt), 'HH:mm')}</Chip>}
             {parsed.rrule && <Chip icon={Repeat}>{repeatLabel(parsed.rrule)}</Chip>}

@@ -58,17 +58,35 @@ function dayTitle(key: string): string {
 }
 
 export function TaskList(): React.JSX.Element {
-  const { tasks, view, loading, openQuickAdd, selected, filter, setFilter, restoreTask, purgeTask } =
-    useStore()
+  const {
+    tasks,
+    view,
+    loading,
+    openQuickAdd,
+    selected,
+    filter,
+    setFilter,
+    restoreTask,
+    purgeTask,
+    selectMode,
+    selectedIds,
+    toggleSelectMode,
+    selectAll,
+    clearSelection,
+    batchComplete,
+    batchDelete
+  } = useStore()
 
   const visible = tasks.filter((t) => matchFilter(t, filter))
   let sections: { key: string; label: string; tasks: Task[] }[] = []
 
   if (view.type === 'today') {
     const overdue = visible.filter(isOverdue)
-    const rest = visible.filter((t) => !isOverdue(t))
+    const scheduled = visible.filter((t) => !isOverdue(t) && (t.scheduledDate || t.dueAt))
+    const unscheduled = visible.filter((t) => !t.scheduledDate && !t.dueAt)
     if (overdue.length) sections.push({ key: 'overdue', label: '逾期', tasks: overdue })
-    if (rest.length) sections.push({ key: 'today', label: '今天', tasks: rest })
+    if (scheduled.length) sections.push({ key: 'today', label: '今天', tasks: scheduled })
+    if (unscheduled.length) sections.push({ key: 'unscheduled', label: '待安排', tasks: unscheduled })
   } else if (view.type === 'upcoming' || view.type === 'completed') {
     const map = new Map<string, Task[]>()
     for (const t of visible) {
@@ -101,11 +119,47 @@ export function TaskList(): React.JSX.Element {
                 : `${visible.length} 项`}
           </span>
         </div>
-        <button className="ghost-btn" onClick={() => openQuickAdd()}>
-          <Plus size={15} />
-          添加任务
-        </button>
+        <div className="head-actions">
+          {view.type !== 'trash' && view.type !== 'completed' && (
+            <button
+              className={`ghost-btn ${selectMode ? 'active' : ''}`}
+              onClick={toggleSelectMode}
+            >
+              {selectMode ? '退出多选' : '多选'}
+            </button>
+          )}
+          <button className="ghost-btn" onClick={() => openQuickAdd()}>
+            <Plus size={15} />
+            添加任务
+          </button>
+        </div>
       </header>
+
+      {selectMode && (
+        <div className="bulk-bar">
+          <span>已选 {selectedIds.length} 项</span>
+          <button className="mini-btn" onClick={selectAll}>
+            全选
+          </button>
+          <button
+            className="mini-btn"
+            disabled={!selectedIds.length}
+            onClick={() => batchComplete()}
+          >
+            完成
+          </button>
+          <button
+            className="mini-btn danger"
+            disabled={!selectedIds.length}
+            onClick={() => batchDelete()}
+          >
+            删除
+          </button>
+          <button className="mini-btn" onClick={clearSelection}>
+            取消
+          </button>
+        </div>
+      )}
 
       {!['trash', 'completed', 'calendar'].includes(view.type) && (
         <div className="filter-bar">

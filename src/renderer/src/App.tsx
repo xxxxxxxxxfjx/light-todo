@@ -34,8 +34,19 @@ export default function App(): React.JSX.Element {
   } = useStore()
 
   useEffect(() => {
+    const savedTheme = localStorage.getItem('lighttodo.theme')
+    if (savedTheme && savedTheme !== 'system') {
+      document.documentElement.dataset.theme = savedTheme
+    }
     refreshSidebar()
     refresh()
+    const dv = localStorage.getItem('lighttodo.defaultView')
+    if (dv && dv !== 'today') {
+      setView(dv as Parameters<typeof setView>[0], {
+        title:
+          dv === 'upcoming' ? '最近 7 天' : dv === 'all' ? '全部' : dv === 'someday' ? '也许' : '今天'
+      })
+    }
     const offQuick = window.api.onQuickAdd((text) => openQuickAdd(text ?? ''))
     const offOpen = window.api.onOpenTask((id) => selectTaskById(id))
     return () => {
@@ -72,12 +83,12 @@ export default function App(): React.JSX.Element {
       if (mod && /^[1-6]$/.test(e.key)) {
         e.preventDefault()
         const map: { key: Parameters<typeof setView>[0]; title: string }[] = [
-          { key: 'inbox', title: '收件箱' },
           { key: 'today', title: '今天' },
           { key: 'upcoming', title: '最近 7 天' },
           { key: 'all', title: '全部' },
           { key: 'someday', title: '也许' },
-          { key: 'completed', title: '已完成' }
+          { key: 'completed', title: '已完成' },
+          { key: 'trash', title: '回收站' }
         ]
         const item = map[Number(e.key) - 1]
         if (item) setView(item.key, { title: item.title })

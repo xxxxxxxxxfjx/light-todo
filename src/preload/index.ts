@@ -37,6 +37,8 @@ const api = {
   },
   tags: {
     create: (name: string, color?: string) => ipcRenderer.invoke('tags:create', name, color),
+    update: (id: string, patch: { name?: string; color?: string | null }) =>
+      ipcRenderer.invoke('tags:update', id, patch),
     remove: (id: string) => ipcRenderer.invoke('tags:delete', id)
   },
   search: {
@@ -53,6 +55,8 @@ const api = {
     exportMarkdown: () => ipcRenderer.invoke('data:exportMarkdown'),
     openBackups: () => ipcRenderer.invoke('data:openBackups'),
     import: () => ipcRenderer.invoke('data:import'),
+    clearCompleted: () => ipcRenderer.invoke('data:clearCompleted'),
+    restoreBackup: (name: string) => ipcRenderer.invoke('data:restoreBackup', name),
     getLoginItem: () => ipcRenderer.invoke('app:getLoginItem'),
     setLoginItem: (enabled: boolean) => ipcRenderer.invoke('app:setLoginItem', enabled)
   },

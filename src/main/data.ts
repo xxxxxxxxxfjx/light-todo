@@ -10,7 +10,8 @@ import {
   writeFileSync
 } from 'node:fs'
 import { basename, join } from 'node:path'
-import { checkpoint, getAllData, getDataDir } from './db'
+import { execFileSync } from 'node:child_process'
+import { checkpoint, clearCompleted, closeDb, getAllData, getDataDir } from './db'
 import { importFromText } from './import'
 
 function stamp(): string {
@@ -101,6 +102,26 @@ export function registerDataIpc(): void {
     return { ok: !!p, path: p }
   })
   ipcMain.handle('data:backups', () => backupList())
+  ipcMain.handle('data:clearCompleted', () => clearCompleted())
+  ipcMain.handle('data:restoreBackup', (_e, name: string) => {
+    try {
+      const safe = basename(name)
+      const src = join(getDataDir(), 'backups', safe)
+      if (!existsSync(src)) return { ok: false, message: '备份文件不存在' }
+      closeDb()
+      const dest = join(getDataDir(), 'lighttodo.db')
+      copyFileSync(src, dest)
+      for (const suffix of ['-wal', '-shm']) {
+        const p = dest + suffix
+        if (existsSync(p)) unlinkSync(p)
+      }
+      app.relaunch()
+      app.exit(0)
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, message: String(e) }
+    }
+  })
   ipcMain.handle('data:exportJson', async () => {
     const { canceled, filePath } = await dialog.showSaveDialog({
       title: '导出 JSON',
@@ -141,9 +162,58 @@ export function registerDataIpc(): void {
     const path = res.filePaths[0]
     return importFromText(readFileSync(path, 'utf8'), basename(path))
   })
-  ipcMain.handle('app:getLoginItem', () => app.getLoginItemSettings().openAtLogin)
+  // Windows 自启直接写 HKCU Run，避免 Electron API 的 path/args 匹配问题
+  const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+  const loginArgs = app.isPackaged ? ['--hidden'] : [app.getAppPath(), '--hidden']
+  const loginCommand = (): string => {
+    const appArg = app.isPackaged ? '' : ` "${app.getAppPath()}"`
+    return `"${process.execPath}"${appArg} --hidden`
+  }
+  const loginEnabled = (): boolean => {
+    try {
+      const out = execFileSync('reg', ['query', RUN_KEY, '/v', 'LightTodo'], {
+        encoding: 'utf8',
+        windowsHide: true
+      })
+      return out.includes('LightTodo')
+    } catch {
+      return false
+    }
+  }
+  ipcMain.handle('app:getLoginItem', () => {
+    try {
+      if (app.getLoginItemSettings({ path: process.execPath, args: loginArgs }).openAtLogin) return true
+    } catch {
+      /* ignore */
+    }
+    return loginEnabled()
+  })
   ipcMain.handle('app:setLoginItem', (_e, enabled: boolean) => {
-    app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] })
-    return app.getLoginItemSettings().openAtLogin
+    // 双保险：Electron 登录项 + HKCU Run（某些环境其中一个会被策略挡住）
+    try {
+      app.setLoginItemSettings({ openAtLogin: enabled, path: process.execPath, args: loginArgs })
+    } catch {
+      /* ignore */
+    }
+    try {
+      if (enabled) {
+        execFileSync(
+          'reg',
+          ['add', RUN_KEY, '/v', 'LightTodo', '/t', 'REG_SZ', '/d', loginCommand(), '/f'],
+          { windowsHide: true }
+        )
+      } else {
+        execFileSync('reg', ['delete', RUN_KEY, '/v', 'LightTodo', '/f'], { windowsHide: true })
+      }
+    } catch {
+      /* 关闭时键不存在会抛错，忽略 */
+    }
+    let viaElectron = false
+    try {
+      viaElectron = app.getLoginItemSettings({ path: process.execPath, args: loginArgs }).openAtLogin
+    } catch {
+      /* ignore */
+    }
+    return enabled ? viaElectron || loginEnabled() : viaElectron
   })
 }

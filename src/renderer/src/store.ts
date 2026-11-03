@@ -21,6 +21,9 @@ interface AppStore {
   filter: TaskFilter
   quickAddOpen: boolean
   quickAddInitial: string
+  quickAddDate: string | null
+  selectMode: boolean
+  selectedIds: string[]
   searchOpen: boolean
   settingsOpen: boolean
   toast: string
@@ -36,7 +39,13 @@ interface AppStore {
   deleteTask: (id: string) => Promise<void>
   restoreTask: (id: string) => Promise<void>
   purgeTask: (id: string) => Promise<void>
-  openQuickAdd: (text?: string) => void
+  toggleSelectMode: () => void
+  toggleSelectId: (id: string) => void
+  selectAll: () => void
+  clearSelection: () => void
+  batchComplete: () => Promise<void>
+  batchDelete: () => Promise<void>
+  openQuickAdd: (text?: string, date?: string) => void
   closeQuickAdd: () => void
   openSearch: () => void
   closeSearch: () => void
@@ -56,6 +65,9 @@ export const useStore = create<AppStore>((set, get) => ({
   filter: 'all',
   quickAddOpen: false,
   quickAddInitial: '',
+  quickAddDate: null,
+  selectMode: false,
+  selectedIds: [],
   searchOpen: false,
   settingsOpen: false,
   toast: '',
@@ -164,8 +176,41 @@ export const useStore = create<AppStore>((set, get) => ({
     get().showToast('已彻底删除')
   },
 
-  openQuickAdd: (text = '') => set({ quickAddOpen: true, quickAddInitial: text, searchOpen: false }),
-  closeQuickAdd: () => set({ quickAddOpen: false, quickAddInitial: '' }),
+  toggleSelectMode: () => set({ selectMode: !get().selectMode, selectedIds: [] }),
+  toggleSelectId: (id) => {
+    const ids = get().selectedIds
+    set({ selectedIds: ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id] })
+  },
+  selectAll: () => set({ selectedIds: get().tasks.map((t) => t.id) }),
+  clearSelection: () => set({ selectedIds: [], selectMode: false }),
+
+  batchComplete: async () => {
+    const ids = get().selectedIds
+    if (!ids.length) return
+    for (const id of ids) await window.api.tasks.setStatus(id, true)
+    set({ selectedIds: [], selectMode: false })
+    await Promise.all([get().refresh(), get().refreshSidebar()])
+    get().showToast(`已完成 ${ids.length} 项`)
+  },
+
+  batchDelete: async () => {
+    const ids = get().selectedIds
+    if (!ids.length) return
+    for (const id of ids) await window.api.tasks.remove(id)
+    if (get().selected && ids.includes(get().selected!.id)) set({ selected: null })
+    set({ selectedIds: [], selectMode: false })
+    await Promise.all([get().refresh(), get().refreshSidebar()])
+    get().showToast(`已删除 ${ids.length} 项`)
+  },
+
+  openQuickAdd: (text = '', date) =>
+    set({
+      quickAddOpen: true,
+      quickAddInitial: text,
+      quickAddDate: date ?? null,
+      searchOpen: false
+    }),
+  closeQuickAdd: () => set({ quickAddOpen: false, quickAddInitial: '', quickAddDate: null }),
   openSearch: () => set({ searchOpen: true, quickAddOpen: false, settingsOpen: false }),
   closeSearch: () => set({ searchOpen: false }),
   openSettings: () => set({ settingsOpen: true, quickAddOpen: false, searchOpen: false }),

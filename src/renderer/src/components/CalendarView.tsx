@@ -10,7 +10,7 @@ import {
   startOfMonth,
   startOfWeek
 } from 'date-fns'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import { useStore } from '../store'
 import type { Task } from '@shared/types'
 
@@ -81,22 +81,36 @@ export function CalendarView(): React.JSX.Element {
               className={`cal-cell ${isSameMonth(d, cursor) ? '' : 'dim'} ${
                 isToday(d) ? 'today' : ''
               }`}
+              onClick={() => openQuickAdd('', key)}
+              title="点击添加任务"
             >
               <div className="cal-date">{d.getDate()}</div>
+              <button
+                className="cal-add"
+                title="在这一天添加任务"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  openQuickAdd('', key)
+                }}
+              >
+                <Plus size={12} />
+              </button>
               <div className="cal-items">
-                {items.slice(0, items.length > 3 ? 2 : 3).map((t) => (
+                {items.map((t) => (
                   <button
                     key={t.id}
                     className={`cal-item ${t.status === 1 ? 'done' : ''}`}
                     data-p={t.priority}
-                    onClick={() => selectTask(t.id)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      selectTask(t.id)
+                    }}
                     onDoubleClick={() => toggleTask(t.id)}
                     title={t.title}
                   >
                     {t.title}
                   </button>
                 ))}
-                {items.length > 3 && <div className="cal-more">还有 {items.length - 2} 项</div>}
               </div>
             </div>
           )
