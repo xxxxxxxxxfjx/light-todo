@@ -18,7 +18,9 @@
     "dist:zip": "electron-vite build && electron-builder --win dir",
     "test:unit": "node --experimental-strip-types scripts/test-nlp.ts && node --experimental-strip-types scripts/test-db.ts && node --experimental-strip-types scripts/test-import.ts && node --experimental-strip-types scripts/test-recurrence.ts",
     "test:e2e": "node scripts/e2e.mjs",
-    "test": "pnpm test:unit && pnpm test:e2e"
+    "test:flows": "node scripts/e2e-flows.mjs",
+    "test:stress": "node --experimental-strip-types scripts/e2e-stress.mjs",
+    "test": "pnpm test:unit && pnpm test:e2e && pnpm test:flows && pnpm test:stress"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.25",

@@ -113,6 +113,8 @@ export function initDb(dir: string): void {
   mkdirSync(dir, { recursive: true })
   db = new DatabaseSync(join(dir, 'lighttodo.db'))
   db.exec('PRAGMA journal_mode = WAL')
+  // WAL 下 NORMAL 兼顾安全与写入速度（崩溃最多丢最后几条事务，不会损坏库）
+  db.exec('PRAGMA synchronous = NORMAL')
   db.exec('PRAGMA foreign_keys = ON')
   db.exec(SCHEMA)
   ensureColumn('tasks', 'reminder_offset', 'INTEGER')
@@ -339,13 +341,23 @@ export function getTask(id: string): Task | null {
 }
 
 function nextSortOrder(listId: string | null, parentId: string | null): number {
+  // 顶层任务：新任务排最上面（sort_order 越小越靠前）；子任务：追加到末尾
+  if (parentId) {
+    const row = conn()
+      .prepare(
+        `SELECT MAX(sort_order) AS m FROM tasks WHERE deleted_at IS NULL
+         AND list_id IS ? AND parent_id IS ?`
+      )
+      .get(listId, parentId) as { m: number | null }
+    return (row.m ?? 0) + 1024
+  }
   const row = conn()
     .prepare(
-      `SELECT MAX(sort_order) AS m FROM tasks WHERE deleted_at IS NULL
-       AND ((list_id IS ? AND parent_id IS ?))`
+      `SELECT MIN(sort_order) AS m FROM tasks WHERE deleted_at IS NULL
+       AND list_id IS ? AND parent_id IS NULL`
     )
-    .get(listId, parentId) as { m: number | null }
-  return (row.m ?? 0) + 1024
+    .get(listId) as { m: number | null }
+  return (row.m ?? 0) - 1024
 }
 
 function ensureTags(names: string[]): string[] {
@@ -748,13 +760,15 @@ export function getSidebar(): SidebarData {
 }
 
 export function searchTasks(q: string): Task[] {
-  const term = `%${q.trim()}%`
-  if (!q.trim()) return []
+  const raw = q.trim()
+  if (!raw) return []
+  // 转义 LIKE 通配符，避免搜索 "%" 或 "_" 时匹配全部
+  const term = `%${raw.replace(/[\\%_]/g, (m) => '\\' + m)}%`
   const rows = conn()
     .prepare(
       `SELECT t.*, ${TAGS_SUBQUERY}, ${SUBTASK_COUNTS} FROM tasks t
-       WHERE t.deleted_at IS NULL AND (t.title LIKE ? OR t.notes LIKE ? OR t.id IN (
-         SELECT tt.task_id FROM task_tags tt JOIN tags tg ON tg.id = tt.tag_id WHERE tg.name LIKE ?
+       WHERE t.deleted_at IS NULL AND (t.title LIKE ? ESCAPE '\\' OR t.notes LIKE ? ESCAPE '\\' OR t.id IN (
+         SELECT tt.task_id FROM task_tags tt JOIN tags tg ON tg.id = tt.tag_id WHERE tg.name LIKE ? ESCAPE '\\'
        ))
        ORDER BY t.status ASC, t.updated_at DESC LIMIT 60`
     )

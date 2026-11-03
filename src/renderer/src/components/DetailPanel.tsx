@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { CalendarDays, Check, Flag, ListTodo, Plus, Repeat, Trash2, X } from 'lucide-react'
 import { useStore } from '../store'
 import { humanDate, isoToLocalInput, localInputToIso, todayStr } from '../lib/format'
@@ -24,6 +24,7 @@ export function DetailPanel(): React.JSX.Element {
     useStore()
   const [title, setTitle] = useState('')
   const [notes, setNotes] = useState('')
+  const notesRef = useRef<HTMLTextAreaElement>(null)
   const [tagText, setTagText] = useState('')
   const [subDraft, setSubDraft] = useState('')
 
@@ -41,7 +42,9 @@ export function DetailPanel(): React.JSX.Element {
     if (title.trim() && title !== task.title) updateTask(task.id, { title: title.trim() })
   }
   const saveNotes = (): void => {
-    if (notes !== task.notes) updateTask(task.id, { notes })
+    // 以 DOM 实际值为准，避免输入法/程序化输入导致 state 未同步时丢备注
+    const value = notesRef.current?.value ?? notes
+    if (value !== task.notes) updateTask(task.id, { notes: value })
   }
   const saveTags = (): void => {
     const names = tagText
@@ -234,6 +237,7 @@ export function DetailPanel(): React.JSX.Element {
             <span>备注</span>
           </div>
           <textarea
+            ref={notesRef}
             className="notes"
             placeholder="支持 Markdown：**加粗**、- 列表、[链接](https://…)"
             value={notes}

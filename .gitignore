@@ -38,3 +38,7 @@ dist/
 
 .e2e/
 
+
+.e2e-flows/
+.e2e-stress/
+

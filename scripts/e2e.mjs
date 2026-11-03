@@ -147,6 +147,26 @@ await runScenario(
 )
 
 await runScenario(
+  'new-task-on-top',
+  [
+    { js: `document.querySelector('.new-task').click()`, wait: 300 },
+    { js: setText('.qa-input', '第一条任务'), wait: 200 },
+    { js: `document.querySelector('.qa-submit').click()`, wait: 600 },
+    { js: `document.querySelector('.new-task').click()`, wait: 300 },
+    { js: setText('.qa-input', '第二条任务'), wait: 200 },
+    { js: `document.querySelector('.qa-submit').click()`, wait: 600 },
+    { js: rows, wait: 100 }
+  ],
+  ({ out }) => {
+    const list = out.results.at(-1)
+    const i1 = list.indexOf('第一条任务')
+    const i2 = list.indexOf('第二条任务')
+    assert(i1 >= 0 && i2 >= 0, '两条任务都应存在')
+    assert(i2 < i1, `新任务应排最上面，实际顺序: ${list.join(' | ')}`)
+  }
+)
+
+await runScenario(
   'add-nlp',
   [
     { js: `document.querySelector('.new-task').click()`, wait: 300 },
