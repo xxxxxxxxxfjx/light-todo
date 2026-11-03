@@ -10,15 +10,18 @@ import {
   startOfMonth,
   startOfWeek
 } from 'date-fns'
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Plus, X } from 'lucide-react'
 import { useStore } from '../store'
+import { parseLocalDate } from '../lib/format'
+import { zhCN } from 'date-fns/locale'
 import type { Task } from '@shared/types'
 
 const WEEK = ['一', '二', '三', '四', '五', '六', '日']
 
 export function CalendarView(): React.JSX.Element {
-  const { tasks, selectTask, toggleTask, openQuickAdd } = useStore()
+  const { tasks, selectTask, toggleTask, openQuickAdd, sidebar } = useStore()
   const [cursor, setCursor] = useState(new Date())
+  const [dayView, setDayView] = useState<string | null>(null)
 
   const byDay = useMemo(() => {
     const map = new Map<string, Task[]>()
@@ -96,7 +99,7 @@ export function CalendarView(): React.JSX.Element {
                 <Plus size={12} />
               </button>
               <div className="cal-items">
-                {items.map((t) => (
+                {items.slice(0, 3).map((t) => (
                   <button
                     key={t.id}
                     className={`cal-item ${t.status === 1 ? 'done' : ''}`}
@@ -111,11 +114,72 @@ export function CalendarView(): React.JSX.Element {
                     {t.title}
                   </button>
                 ))}
+                {items.length > 3 && (
+                  <button
+                    className="cal-more"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setDayView(key)
+                    }}
+                  >
+                    +{items.length - 3} 项
+                  </button>
+                )}
               </div>
             </div>
           )
         })}
       </div>
+
+      {dayView && (
+        <div className="overlay cal-day-overlay" onMouseDown={() => setDayView(null)}>
+          <div className="day-modal" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="day-modal-head">
+              <span>
+                {format(parseLocalDate(dayView), 'M月d日 EEEE', { locale: zhCN })}
+              </span>
+              <button className="icon-btn" onClick={() => setDayView(null)}>
+                <X size={15} />
+              </button>
+            </div>
+            <div className="day-modal-list">
+              {(byDay.get(dayView) ?? []).map((t) => {
+                const list = sidebar.lists.find((l) => l.id === t.listId)
+                return (
+                  <div key={t.id} className={`day-row ${t.status === 1 ? 'done' : ''}`}>
+                    <button
+                      className={`check ${t.status === 1 ? 'checked' : ''}`}
+                      onClick={() => toggleTask(t.id)}
+                      aria-label="完成"
+                    >
+                      <Check size={11} strokeWidth={3} />
+                    </button>
+                    <button
+                      className="day-row-title"
+                      onClick={() => {
+                        selectTask(t.id)
+                        setDayView(null)
+                      }}
+                    >
+                      {t.title}
+                    </button>
+                    {list && <span className="meta-chip list">{list.name}</span>}
+                  </div>
+                )
+              })}
+            </div>
+            <button
+              className="primary-btn day-add"
+              onClick={() => {
+                openQuickAdd('', dayView)
+                setDayView(null)
+              }}
+            >
+              <Plus size={14} /> 在这天添加
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   )
 }

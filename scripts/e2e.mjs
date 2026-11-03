@@ -607,6 +607,37 @@ await runScenario(
   }
 )
 
+await runScenario(
+  'calendar-overflow',
+  [
+    {
+      js: `(async () => {
+        const d = new Date();
+        const s = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        await window.api.tasks.create({ title: '溢出任务A', scheduledDate: s });
+        await window.api.tasks.create({ title: '溢出任务B', scheduledDate: s });
+        return 'OK';
+      })()`,
+      wait: 500
+    },
+    { js: clickText('.nav-item', '日历'), wait: 800 },
+    { js: `document.querySelector('.cal-cell.today')?.querySelectorAll('.cal-item').length`, wait: 100 },
+    { js: `document.querySelector('.cal-cell.today .cal-more')?.textContent ?? ''`, wait: 100 },
+    { js: `document.querySelector('.cal-cell.today .cal-more')?.click()`, wait: 400 },
+    { js: `document.querySelectorAll('.day-row').length`, wait: 100 },
+    { js: `document.querySelector('.day-row .check')?.click()`, wait: 700 },
+    { js: `document.querySelectorAll('.day-row').length`, wait: 100 }
+  ],
+  ({ out, db }) => {
+    assert(out.results[2] === 3, `今天最多显示 3 条，实际 ${out.results[2]}`)
+    assert(String(out.results[3]).includes('+2'), `应显示 +2 项，实际 ${out.results[3]}`)
+    assert(out.results[5] === 5, `弹层应显示全部 5 条，实际 ${out.results[5]}`)
+    assert(out.results[7] === 4, `完成后弹层应剩 4 条，实际 ${out.results[7]}`)
+    const done = one(db, `SELECT COUNT(*) AS c FROM tasks WHERE status = 1`)
+    assert(done.c === 1, `应有 1 条已完成，实际 ${done.c}`)
+  }
+)
+
 // 持久化：两次启动同一数据目录
 if (!only || only === 'persistence') {
   const dir = join(E2E_DIR, 'persistence')

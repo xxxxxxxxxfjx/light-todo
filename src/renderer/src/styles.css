@@ -877,7 +877,8 @@ button {
   border-radius: 6px;
 }
 .detail-title:focus {
-  background: rgba(0, 0, 0, 0.035);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .detail-title.done {
   color: var(--text-3);
@@ -919,7 +920,8 @@ button {
 .field-value input:focus,
 .field-value select:focus {
   background: var(--surface);
-  box-shadow: 0 0 0 1.5px var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .segmented {
@@ -1815,12 +1817,14 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.28); }
 :root[data-theme='dark'] ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.16); }
 
-button:focus-visible,
+button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: none;
 }
 
 /* ── visual refresh v2 ─────────────────────────────────── */
@@ -1869,3 +1873,82 @@ select:focus-visible {
   box-shadow: 0 4px 12px rgba(15, 108, 189, 0.28);
 }
 .task-scroll { padding-top: 2px; }
+
+/* ── calendar overflow + day panel ─────────────────────── */
+.cal-more {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 10.5px;
+  text-align: left;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.cal-more:hover { background: var(--accent-soft); }
+
+.overlay.cal-day-overlay {
+  align-items: center;
+  padding-top: 0;
+}
+.day-modal {
+  width: 340px;
+  max-height: 62vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+}
+.day-modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 13px;
+}
+.day-modal-list {
+  padding: 8px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.day-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+.day-row:hover { background: var(--hover); }
+.day-row-title {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--text);
+  padding: 0;
+}
+.day-row-title:hover { color: var(--accent); }
+.day-row.done .day-row-title {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+.day-add {
+  margin: 10px 14px 14px;
+  justify-content: center;
+}
+
+/* refine input focus (no hard outline) */
+.qa-input:focus,
+.search-input-row input:focus {
+  outline: none;
+}
+.qa:focus-within {
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-panel);
+}
