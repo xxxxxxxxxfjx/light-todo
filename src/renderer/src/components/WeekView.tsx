@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { format, isToday } from 'date-fns'
+import { CalendarDays } from 'lucide-react'
 import { zhCN } from 'date-fns/locale'
 import type { Task } from '@shared/types'
+import type { ExternalCalendarEvent } from '../lib/calendar-events'
 import { layoutWeekSchedule } from '../lib/week-layout'
 
 interface Props {
   days: Date[]
   date: string
   byDay: Map<string, Task[]>
+  eventsByDay?: Map<string, ExternalCalendarEvent[]>
   choose: (date: string) => void
   select: (id: string) => void
   add: (text: string, date: string) => void
@@ -18,7 +21,7 @@ interface Props {
 
 const MAX_ALL_DAY = 3
 
-export function WeekView({ days, date, byDay, choose, select, add, move, colorOf, selectedId }: Props): React.JSX.Element {
+export function WeekView({ days, date, byDay, eventsByDay, choose, select, add, move, colorOf, selectedId }: Props): React.JSX.Element {
   const scroll = useRef<HTMLDivElement>(null)
   const schedule = useMemo(() => layoutWeekSchedule(days.map(day => (byDay.get(format(day, 'yyyy-MM-dd')) ?? []).filter(t => t.dueAt && !t.dueAllDay))), [days, byDay])
   useEffect(() => {
@@ -55,13 +58,20 @@ export function WeekView({ days, date, byDay, choose, select, add, move, colorOf
           const key = format(day, 'yyyy-MM-dd')
           const allDay = (byDay.get(key) ?? []).filter(t => !t.dueAt || t.dueAllDay)
           const visible = allDay.slice(0, MAX_ALL_DAY)
+          const dayEvents = eventsByDay?.get(key) ?? []
+          const allDayEvents = dayEvents.filter(e => e.allDay)
+          const shownEvents = allDayEvents.slice(0, Math.max(0, MAX_ALL_DAY - visible.length))
+          const hidden = allDay.length - visible.length + allDayEvents.length - shownEvents.length
           return <div key={key} className={`week-all-day-cell ${key === date ? 'selected' : ''}`} data-date={key} onClick={() => choose(key)} onDoubleClick={() => add('', key)} onDragOver={e => e.preventDefault()} onDrop={e => {
             e.preventDefault()
             const id = e.dataTransfer.getData('text/lighttodo-task')
             if (id) move(id, key)
           }}>
             {visible.map(t => taskButton(t))}
-            {allDay.length > visible.length && <span className="week-more" title="点击日期在下方查看全部">还有 {allDay.length - visible.length} 项…</span>}
+            {shownEvents.map(e => <div key={e.id} className="week-task external" title={e.title}>
+              <CalendarDays size={10} className="week-ext-icon"/><span>{e.title}</span>
+            </div>)}
+            {hidden > 0 && <span className="week-more" title="点击日期在下方查看全部">还有 {hidden} 项…</span>}
           </div>
         })}
       </div>
@@ -70,6 +80,7 @@ export function WeekView({ days, date, byDay, choose, select, add, move, colorOf
         {days.map((day, dayIndex) => {
           const key = format(day, 'yyyy-MM-dd')
           const timed = schedule.days[dayIndex]
+          const timedEvents = (eventsByDay?.get(key) ?? []).filter(e => !e.allDay && format(new Date(e.startAt), 'yyyy-MM-dd') === key)
           return <div key={key} data-date={key} className={`week-column ${key === date ? 'selected' : ''}`}
             onClick={() => choose(key)} onDoubleClick={e => {
               if (e.target !== e.currentTarget) return
@@ -82,6 +93,19 @@ export function WeekView({ days, date, byDay, choose, select, add, move, colorOf
               if (id) move(id, key)
             }}>
             {schedule.hours.map((slot, hour) => <div key={hour} className="week-hour-line" style={{ top: slot.top }} aria-hidden="true"/>)}
+            {timedEvents.map(event => {
+              const start = new Date(event.startAt)
+              if (Number.isNaN(start.getTime())) return null
+              const startMin = start.getHours() * 60 + start.getMinutes()
+              const end = event.endAt ? new Date(event.endAt) : null
+              let endMin = end && !Number.isNaN(end.getTime()) ? end.getHours() * 60 + end.getMinutes() : startMin + 60
+              if (endMin <= startMin) endMin = startMin + 60
+              const top = schedule.hours[Math.floor(startMin / 60)].top + (startMin % 60) / 60 * 44
+              const height = Math.max(20, (endMin - startMin) / 60 * 44)
+              return <div key={event.id} className="week-ext-event" style={{ top, height }} title={`${event.title} · ${format(start, 'HH:mm')}`}>
+                <CalendarDays size={10}/><span>{event.title}</span><time>{format(start, 'HH:mm')}</time>
+              </div>
+            })}
             {timed.map(({ start, top, height, tasks }) => <div key={start} className="week-event" role="group"
               aria-label={`${String(Math.floor(start / 60)).padStart(2, '0')}:${String(start % 60).padStart(2, '0')}，${tasks.length} 项任务`}
               style={{ top, height }} onDoubleClick={e => e.stopPropagation()}>

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeTheme, screen } from 'electron'
 import { join } from 'node:path'
-import { createTask, getSetting, setSetting, listTasks, setTaskStatus, getTask, updateTask, deleteTask } from './db'
+import { createTask, getSetting, setSetting, listTasks, listCompletedBetween, setTaskStatus, getTask, updateTask, deleteTask } from './db'
 import { parseQuickAdd } from '../shared/nlp'
 import {
   DEFAULT_ISLAND_SETTINGS,
@@ -51,6 +51,13 @@ function todayStr(): string {
   return new Date().toLocaleDateString('sv-SE')
 }
 
+function localDayRange(day: string): { from: string; to: string } {
+  const [year, month, date] = day.split('-').map(Number)
+  const start = new Date(year, month - 1, date)
+  const end = new Date(year, month - 1, date + 1)
+  return { from: start.toISOString(), to: end.toISOString() }
+}
+
 function isOverdue(task: Task): boolean {
   const today = todayStr()
   if (task.scheduledDate && task.scheduledDate < today) return true
@@ -89,9 +96,10 @@ export function islandState(): IslandState {
     if (page.length < 500) break
   }
   const completedToday: Task[] = []
+  const range = localDayRange(today)
   for (let offset = 0; ; offset += 500) {
-    const page = listTasks({ view: 'completed', offset, limit: 500 })
-    completedToday.push(...page.filter(t => t.completedAt && new Date(t.completedAt).toLocaleDateString('sv-SE') === today))
+    const page = listCompletedBetween(range.from, range.to, 500, offset)
+    completedToday.push(...page)
     if (page.length < 500) break
   }
   const done = completedToday.length
@@ -229,6 +237,10 @@ function applyEnabled(): void {
     }
   })
   island.setAlwaysOnTop(true, 'screen-saver')
+  if (process.platform === 'darwin') {
+    // 跟随用户在多个 Space / 全屏应用上显示，否则切到全屏时任务岛会消失。
+    island.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
+  }
   island.setIgnoreMouseEvents(true, { forward: true })
   interactive = false
   phase = 'rest'

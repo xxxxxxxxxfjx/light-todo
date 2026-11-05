@@ -16,6 +16,7 @@ import {
   Trash2
 } from 'lucide-react'
 import { useStore } from '../store'
+import { modKey } from '../lib/platform'
 import type { ViewKey } from '@shared/types'
 
 const NAV: { key: ViewKey; label: string; icon: typeof Sun }[] = [
@@ -153,7 +154,7 @@ export function Sidebar(): React.JSX.Element {
       <button className="new-task" onClick={() => openQuickAdd()}>
         <Plus size={16} />
         <span>新建任务</span>
-        <kbd>Ctrl N</kbd>
+        <kbd>{modKey('N')}</kbd>
       </button>
 
       <nav className="nav">

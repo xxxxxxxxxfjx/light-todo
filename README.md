@@ -20,7 +20,8 @@ Windows 上最快的中文待办 —— 本地优先、键盘优先、开箱即�
 - 托盘常驻、全局快捷键、开机自启、Jump List、URL Scheme
 - 重复任务：RRULE 引擎，完成后自动生成下一次，支持按计划 / 按完成两种语义
 - 提醒：任务级提醒（准时 / 提前 5 分钟 / 15 分钟 / 1 小时 / 1 天），30 秒轮询 + 系统 Toast
-- 日历视图：月历、任务落格、今天高亮、双击完成
+- 日历视图：月历 / 周视图 / 日视图、任务落格、今天高亮、双击完成
+- 只读 ICS 日历订阅：设置内填写订阅地址，月 / 周 / 日视图展示只读日程，支持全天与跨天日程
 - 设置页：数据目录、JSON / Markdown 导出、JSON / CSV 导入（TickTick/Todoist）、立即备份、开机自启
 - 数据：启动 / 退出自动备份（保留 14 份）、SQLite WAL checkpoint
 - 打包：win-unpacked + 便携版 exe + zip（NSIS 安装包在受限环境无法生成，正常机器可用）
@@ -66,7 +67,9 @@ pnpm dist:setup   # 打 NSIS 安装包（在部分受限/无桌面会话环境�
 pnpm typecheck    # 类型检查
 ```
 
-> 打包约定：每次完成代码/界面/文档改动后都要执行 `pnpm dist`，不能只交源码；版本号在 `package.json` 中递增，产物在 `release/<version>/`。
+> 打包约定：每次完成代码/界面/文档改动后都要执行对应平台打包，不能只交源码；版本号在 `package.json` 中递增。
+> - Windows：`pnpm dist`，产物在 `release/<version>/`
+> - macOS：`pnpm dist:mac`，产物在 `release/mac-<version>/`（本机验证用 ad-hoc 签名，正式分发需 Developer ID + notarization）
 
 当前产物：`release/0.5.0/LightTodo-0.5.0-x64.exe`（直接双击）与
 `release/0.5.0/LightTodo-0.5.0-portable.zip`（完整解压后双击 `LightTodo.exe`）。
@@ -75,6 +78,16 @@ pnpm typecheck    # 类型检查
 构建使用本地 Electron 分发目录及 Windows 自带 .NET Framework C# 编译器。
 
 开发数据默认放在项目下 `.tmp/data/`，安装版放在 `%APPDATA%/LightTodo/`，便携版放在 exe 同目录 `LightTodoData/`。
+
+macOS 开发/预览：
+
+```bash
+pnpm install
+node scripts/app-cdp.mjs --fresh   # 启动并开放 CDP 9222（macOS 自动使用 Electron.app）
+pnpm dist:mac                      # 产出 release/mac-<version>/LightTodo-<version>-arm64.zip
+```
+
+macOS 快捷键文案会自动显示 `⌘`，标题栏为交通灯预留左侧空间；Windows 仍显示 `Ctrl` 与右侧窗口控件。
 
 ## 临时文件
 

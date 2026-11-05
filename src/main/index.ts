@@ -132,7 +132,9 @@ function createWindow(): void {
           },
           ...(win11 ? { backgroundMaterial: 'mica' as const } : {})
         }
-      : {}),
+      : process.platform === 'darwin'
+        ? { trafficLightPosition: { x: 14, y: 13 } }
+        : {}),
     backgroundColor: windowColors(nativeTheme.shouldUseDarkColors).color,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -329,7 +331,17 @@ function createTray(): void {
     console.warn('TRAY_ICON_MISSING')
     return
   }
-  const image = nativeImage.createFromPath(p).resize({ width: 16, height: 16 })
+  // macOS 菜单栏用单色 template 图标，避免彩色圆角方块在菜单栏里显得突兀。
+  const templatePath = process.platform === 'darwin'
+    ? [join(process.resourcesPath, 'trayTemplate.png'), join(app.getAppPath(), 'build', 'trayTemplate.png')].find(existsSync)
+    : null
+  const image = templatePath
+    ? (() => {
+        const img = nativeImage.createFromPath(templatePath).resize({ width: 18, height: 18 })
+        img.setTemplateImage(true)
+        return img
+      })()
+    : nativeImage.createFromPath(p).resize({ width: 16, height: 16 })
   tray = new Tray(image)
   tray.setToolTip('轻单 LightTodo')
   const menu = Menu.buildFromTemplate([
@@ -347,7 +359,19 @@ function createTray(): void {
     }
   ])
   tray.setContextMenu(menu)
-  tray.on('click', showMain)
+  // macOS 单击菜单栏图标应展开菜单，不再额外抢焦点打开主窗口。
+  if (process.platform !== 'darwin') tray.on('click', showMain)
+}
+
+/** macOS 需要标准应用菜单，否则 Cmd+C/V/Q 等系统快捷键会缺失。 */
+function installApplicationMenu(): void {
+  if (process.platform !== 'darwin') return
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { role: 'appMenu' },
+    { role: 'fileMenu' },
+    { role: 'editMenu' },
+    { role: 'windowMenu' }
+  ]))
 }
 
 const REMINDER_MISSED_AFTER_MS = 10 * 60 * 1000
@@ -531,7 +555,7 @@ function setupIntegration(): void {
     console.warn('PROTOCOL_REGISTER_FAILED', e)
   }
 
-  if (app.isPackaged) {
+  if (app.isPackaged && process.platform === 'win32') {
     try {
       app.setJumpList([
         {
@@ -567,6 +591,11 @@ if (ownsInstance) app.whenReady().then(() => {
     setSetting('ui_theme', theme)
     return { ...syncWindowTheme(), dark: nativeTheme.shouldUseDarkColors }
   })
+  installApplicationMenu()
+  if (process.platform === 'darwin') {
+    const dockIcon = iconPath()
+    if (dockIcon) app.dock?.setIcon(dockIcon)
+  }
   registerIpc()
   registerDataIpc()
   createWindow()

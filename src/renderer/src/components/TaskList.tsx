@@ -7,6 +7,7 @@ import { differenceInCalendarDays, format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { parseLocalDate } from '../lib/format'
 import { isOverdue, matchFilter } from '../lib/task-filter'
+import { globalCaptureLabel } from '../lib/platform'
 import type { Task, ViewKey } from '@shared/types'
 
 const FILTERS: { key: TaskFilter; label: string }[] = [
@@ -341,7 +342,7 @@ export function TaskList(): React.JSX.Element {
                 ? hasMore
                   ? '还有任务没有加载，继续加载可能找到匹配项。'
                   : '当前筛选把已有任务隐藏了，清除筛选即可看到它们。'
-                : '按 Ctrl+Shift+Space 随时记下一条，或在下方输入'}
+                : '按 ' + globalCaptureLabel + ' 随时记下一条，或在下方输入'}
             </div>
             {filterHidesAll ? (
               hasMore ? (

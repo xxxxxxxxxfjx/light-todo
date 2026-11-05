@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { Check, Plus, SquareArrowOutUpRight, Pencil, Trash2, X } from 'lucide-react'
 import { ISLAND_ACCENTS, type IslandState } from '../../../shared/island'
 import type { Task } from '../../../shared/types'
+import { modKey } from '../lib/platform'
 import './island.css'
 
 type Phase = 'rest' | 'peek' | 'panel'
@@ -230,7 +231,7 @@ function Island(): React.JSX.Element | null {
           onClick={event => { event.stopPropagation(); void complete(next.id) }}
         ><Check size={13}/></button>}
         {phase === 'panel' && <>
-          <button className="icon-btn" aria-label="快速添加" title="新增今天的任务（Ctrl+N）"
+          <button className="icon-btn" aria-label="快速添加" title={`新增今天的任务（${modKey('N')}）`}
             onClick={event => { event.stopPropagation(); setEditingId(null); setDraft(''); setAdding(true); setPhase('panel'); window.islandApi.phase('panel') }}>
             <Plus size={14}/>
           </button>
@@ -284,7 +285,7 @@ function Island(): React.JSX.Element | null {
             <button className="row-action" aria-label={`删除：${task.title}`} title="移入回收站" disabled={busy !== null || saving} onClick={() => void remove(task.id)}><Trash2 size={12}/></button>
           </div>)}
         </div>
-        <footer className="hint">Ctrl+N 新增今天 · Esc 收起 · 拖动顶部 · 删除可从回收站恢复</footer>
+        <footer className="hint">{modKey('N')} 新增今天 · Esc 收起 · 拖动顶部 · 删除可从回收站恢复</footer>
       </div>
     </section>
   </div>

@@ -64,6 +64,42 @@ function segmentDistance(px, py, ax, ay, bx, by) {
   return Math.hypot(px - (ax + t * vx), py - (ay + t * vy))
 }
 
+function renderTemplate(size) {
+  const ss = 4
+  const S = size * ss
+  const out = Buffer.alloc(size * size * 4)
+  const pts = [
+    [S * 0.28, S * 0.52],
+    [S * 0.44, S * 0.68],
+    [S * 0.73, S * 0.33]
+  ]
+  const stroke = S * 0.085
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      let hits = 0
+      for (let sy = 0; sy < ss; sy++) {
+        for (let sx = 0; sx < ss; sx++) {
+          const px = x * ss + sx + 0.5
+          const py = y * ss + sy + 0.5
+          const d = Math.min(
+            segmentDistance(px, py, pts[0][0], pts[0][1], pts[1][0], pts[1][1]),
+            segmentDistance(px, py, pts[1][0], pts[1][1], pts[2][0], pts[2][1])
+          )
+          const cap = Math.min(
+            Math.hypot(px - pts[0][0], py - pts[0][1]),
+            Math.hypot(px - pts[2][0], py - pts[2][1])
+          )
+          if (Math.min(d, cap) <= stroke / 2) hits++
+        }
+      }
+      const i = (y * size + x) * 4
+      // Template image 只读取 alpha；RGB 保持黑色，让菜单栏自动适配深浅色。
+      out[i + 3] = Math.round((hits / (ss * ss)) * 255)
+    }
+  }
+  return encodePng(size, size, out)
+}
+
 function render(size) {
   const ss = 4
   const S = size * ss
@@ -123,5 +159,7 @@ function render(size) {
 const buildDir = join(process.cwd(), 'build')
 mkdirSync(buildDir, { recursive: true })
 writeFileSync(join(buildDir, 'icon.png'), render(256))
+writeFileSync(join(buildDir, 'icon-mac.png'), render(512))
 writeFileSync(join(buildDir, 'tray.png'), render(32))
+writeFileSync(join(buildDir, 'trayTemplate.png'), renderTemplate(44))
 console.log('icons written')

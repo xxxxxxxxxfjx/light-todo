@@ -1,5 +1,6 @@
 import { Menu, Search } from 'lucide-react'
 import { useStore } from '../store'
+import { modKey } from '../lib/platform'
 
 export function TitleBar({ onSearch }: { onSearch: () => void }): React.JSX.Element {
   const { sidebarOpen, toggleSidebar } = useStore()
@@ -24,7 +25,7 @@ export function TitleBar({ onSearch }: { onSearch: () => void }): React.JSX.Elem
       <button className="titlebar-search" onClick={onSearch} title="搜索">
         <Search size={14} />
         <span>搜索</span>
-        <kbd>Ctrl F</kbd>
+        <kbd>{modKey('F')}</kbd>
       </button>
     </header>
   )

@@ -1,9 +1,9 @@
 import {
-  markCalendarSubscriptionSynced,
-  replaceCalendarEvents,
+  commitCalendarSubscriptionSync,
+  getCalendarSubscription,
   saveCalendarSubscription,
   setCalendarSubscriptionError
-} from './db'
+} from './db.ts'
 
 /**
  * 只读 ICS 订阅（90 天路线第 4 阶段）。
@@ -371,7 +371,6 @@ export async function syncIcsSubscription(
   fetchImpl: FetchLike = fetch
 ): Promise<IcsSyncResult> {
   const url = normalizeSubscriptionUrl(input)
-  saveCalendarSubscription(url)
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   try {
@@ -390,13 +389,24 @@ export async function syncIcsSubscription(
     if (!hasVCalendar(body)) throw new Error('不是有效的 ICS 日历（缺少 BEGIN:VCALENDAR）')
     const events = parseIcs(body)
     const name = calendarNameFromIcs(body)
-    if (name) saveCalendarSubscription(url, name)
-    replaceCalendarEvents(SUBSCRIPTION_ID, events)
-    markCalendarSubscriptionSynced()
-    return { url, count: events.length, ...(name ? { name } : {}) }
+    // 拉取和解析都成功后才在同一个事务里切换地址、事件与同步状态。
+    // 新地址失败不会覆盖旧地址，也不会让旧事件挂在新地址下面。
+    const count = commitCalendarSubscriptionSync(SUBSCRIPTION_ID, url, name ?? null, events)
+    return { url, count, ...(name ? { name } : {}) }
   } catch (error) {
     const message = readableFetchError(error)
-    setCalendarSubscriptionError(message)
+    const current = getCalendarSubscription()
+    if (!current) {
+      // 第一次订阅失败也保留地址，用户才能看到失败的是哪个地址并重试。
+      try {
+        saveCalendarSubscription(url)
+        setCalendarSubscriptionError(message)
+      } catch {
+        /* 数据库错误由下面的 throw 统一报告 */
+      }
+    } else if (current.url === url) {
+      setCalendarSubscriptionError(message)
+    }
     throw error instanceof Error ? error : new Error(message)
   } finally {
     clearTimeout(timer)

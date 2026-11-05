@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { resolveQuickAddDate } from './lib/quick-add-date'
 import type { CreateTaskInput, SidebarData, Task, UpdateTaskInput, ViewKey } from '@shared/types'
 import { matchFilter, type TaskFilter } from './lib/task-filter'
 export type { TaskFilter } from './lib/task-filter'
@@ -44,7 +45,10 @@ interface AppStore {
   error: string
   hasMore: boolean
   calendarRange: { from: string; to: string } | null
+  /** 日历当前选中的那一天；在日历里新建任务默认落到这天。 */
+  calendarDate: string | null
   setCalendarRange: (from: string, to: string) => Promise<void>
+  setCalendarDate: (date: string | null) => void
   loadMore: () => Promise<void>
   filter: TaskFilter
   quickAddOpen: boolean
@@ -132,6 +136,8 @@ export const useStore = create<AppStore>((set, get) => ({
   error: '',
   hasMore: false,
   calendarRange: null,
+  calendarDate: null,
+  setCalendarDate: (date) => set({ calendarDate: date }),
   setCalendarRange: async (from, to) => {
     const previous = get().calendarRange
     if (previous?.from === from && previous.to === to) return
@@ -454,15 +460,19 @@ export const useStore = create<AppStore>((set, get) => ({
     }
   },
 
-  openQuickAdd: (text = '', date, inbox = false) =>
+  openQuickAdd: (text = '', date, inbox = false) => {
+    // 日历里点选/切换日期后，Ctrl+N、侧栏「新建任务」和命令面板都应落到选中的那天；
+    // 全局捕获带 inbox 标记，仍然进入收件箱而不是继承日历日期。
+    const calendarDefault = resolveQuickAddDate(date, get().view.type, get().calendarDate, inbox)
     set({
       quickAddOpen: true,
       quickAddInitial: text,
-      quickAddDate: date ?? null,
+      quickAddDate: calendarDefault,
       quickAddInbox: inbox,
       searchOpen: false,
       settingsOpen: false
-    }),
+    })
+  },
   closeQuickAdd: () =>
     set({
       quickAddOpen: false,

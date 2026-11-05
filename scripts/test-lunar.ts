@@ -38,5 +38,19 @@ assert.equal(calendarAnnotation(local(2026, 11, 7)), '休')
 const leap = getLunarInfo(local(2023, 3, 22))
 assert.equal(leap.isLeap, true)
 assert.equal(leap.monthName, '二月')
+assert.equal(leap.text, '闰二月')
+
+// 闰二月初二不是龙抬头：闰月不匹配固定农历节日，也不在日历格子里伪造节日。
+const leapDragon = getLunarInfo(local(2023, 3, 23))
+assert.equal(leapDragon.isLeap, true)
+assert.equal(leapDragon.day, 2)
+assert.equal(leapDragon.festival, null)
+assert.equal(leapDragon.text, '初二')
+assert.equal(calendarAnnotation(local(2023, 3, 23)), '初二')
+
+// 普通二月初二仍然是龙抬头。
+const dragon = getLunarInfo(local(2026, 3, 20))
+assert.equal(dragon.isLeap, false)
+assert.equal(dragon.festival, '龙抬头')
 
 console.log('PASS 农历日期、节日与闰月标记')

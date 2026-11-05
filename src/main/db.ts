@@ -72,6 +72,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_due      ON tasks(due_at, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_parent   ON tasks(parent_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_reminder ON tasks(reminder_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_status   ON tasks(status, deleted_at, parent_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_completed ON tasks(status, completed_at);
 
 CREATE TABLE IF NOT EXISTS tags (
   id    TEXT PRIMARY KEY,
@@ -558,6 +559,31 @@ export function listTasks(opts: {
   params.push(limit)
   params.push(opts.offset ?? 0)
   const rows = conn().prepare(sql).all(...(params as never[])) as Record<string, unknown>[]
+  return rows.map(mapTask)
+}
+
+/**
+ * 查询指定时间区间内完成的任务（用于任务岛“今天已完成”）。
+ * 直接用 completed_at 的 ISO 区间走索引，避免为了取当天完成而扫描全部历史再过滤。
+ */
+export function listCompletedBetween(
+  fromIso: string,
+  toIso: string,
+  limit = 500,
+  offset = 0
+): Task[] {
+  const safeLimit = Number.isFinite(limit) ? Math.max(0, Math.trunc(limit)) : 500
+  const safeOffset = Number.isFinite(offset) ? Math.max(0, Math.trunc(offset)) : 0
+  const rows = conn()
+    .prepare(
+      `SELECT t.*, ${TAGS_SUBQUERY}, ${SUBTASK_COUNTS}
+       FROM tasks t
+       WHERE t.deleted_at IS NULL AND t.parent_id IS NULL AND t.status = 1
+         AND t.completed_at IS NOT NULL AND t.completed_at >= ? AND t.completed_at < ?
+       ORDER BY t.completed_at DESC, t.id ASC
+       LIMIT ? OFFSET ?`
+    )
+    .all(fromIso, toIso, safeLimit, safeOffset) as Record<string, unknown>[]
   return rows.map(mapTask)
 }
 
@@ -1195,7 +1221,7 @@ export function getWeeklyReview(now = new Date()): WeeklyReviewData {
     .prepare(
       `SELECT date(completed_at, 'localtime') AS day, COUNT(*) AS count
        FROM tasks
-       WHERE deleted_at IS NULL AND status = 1 AND completed_at IS NOT NULL
+       WHERE deleted_at IS NULL AND parent_id IS NULL AND status = 1 AND completed_at IS NOT NULL
          AND date(completed_at, 'localtime') BETWEEN ? AND ?
        GROUP BY day`
     )
@@ -1205,7 +1231,7 @@ export function getWeeklyReview(now = new Date()): WeeklyReviewData {
     .prepare(
       `SELECT date(created_at, 'localtime') AS day, COUNT(*) AS count
        FROM tasks
-       WHERE deleted_at IS NULL
+       WHERE deleted_at IS NULL AND parent_id IS NULL
          AND date(created_at, 'localtime') BETWEEN ? AND ?
        GROUP BY day`
     )
@@ -1227,7 +1253,7 @@ export function getWeeklyReview(now = new Date()): WeeklyReviewData {
       conn()
         .prepare(
           `SELECT COUNT(*) AS count FROM tasks
-           WHERE deleted_at IS NULL AND status = 0`
+           WHERE deleted_at IS NULL AND parent_id IS NULL AND status = 0`
         )
         .get() as { count: number | null }
     ).count ?? 0
@@ -1238,7 +1264,7 @@ export function getWeeklyReview(now = new Date()): WeeklyReviewData {
       conn()
         .prepare(
           `SELECT COUNT(*) AS count FROM tasks
-           WHERE deleted_at IS NULL AND status = 0
+           WHERE deleted_at IS NULL AND parent_id IS NULL AND status = 0
              AND (
                (due_at IS NOT NULL AND julianday(due_at) < julianday(?))
                OR (scheduled_date IS NOT NULL AND scheduled_date < ?)
@@ -1256,7 +1282,7 @@ export function getWeeklyReview(now = new Date()): WeeklyReviewData {
                   THEN 1 ELSE 0 END) AS completed,
          SUM(CASE WHEN t.deleted_at IS NULL AND t.status = 0 THEN 1 ELSE 0 END) AS active
        FROM lists l
-       LEFT JOIN tasks t ON t.list_id = l.id
+       LEFT JOIN tasks t ON t.list_id = l.id AND t.parent_id IS NULL
        WHERE l.archived_at IS NULL
        GROUP BY l.id
        ORDER BY completed DESC, active DESC, l.sort_order ASC, l.created_at ASC`
@@ -1285,7 +1311,7 @@ export function getWeeklyReview(now = new Date()): WeeklyReviewData {
                   THEN 1 ELSE 0 END) AS completed,
          SUM(CASE WHEN t.status = 0 THEN 1 ELSE 0 END) AS active
        FROM tasks t
-       WHERE t.deleted_at IS NULL
+       WHERE t.deleted_at IS NULL AND t.parent_id IS NULL
          AND (
            t.list_id IS NULL
            OR NOT EXISTS (
@@ -1545,6 +1571,38 @@ export function setCalendarSubscriptionError(message: string | null): void {
   conn()
     .prepare('UPDATE calendar_subscription SET last_error = ?, updated_at = ? WHERE id = 1')
     .run(message, nowIso())
+}
+
+/**
+ * 同步成功后的唯一提交点：地址、名称、事件快照和同步状态在同一个事务里切换。
+ * 拉取/解析失败时不会走到这里，旧订阅与旧事件保持原样。
+ */
+export function commitCalendarSubscriptionSync(
+  subscriptionId: string,
+  url: string,
+  name: string | null,
+  events: CalendarEventInput[],
+  syncedAt: string = nowIso()
+): number {
+  const cleanUrl = url.trim()
+  if (!cleanUrl) throw new Error('日历订阅地址不能为空')
+  const cleanName = name?.trim() || null
+  const stamp = nowIso()
+  return transaction(() => {
+    conn()
+      .prepare(
+        `INSERT INTO calendar_subscription (id, url, name, last_synced_at, last_error, updated_at)
+         VALUES (1, ?, ?, ?, NULL, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           url = excluded.url,
+           name = excluded.name,
+           last_synced_at = excluded.last_synced_at,
+           last_error = NULL,
+           updated_at = excluded.updated_at`
+      )
+      .run(cleanUrl, cleanName, syncedAt, stamp)
+    return replaceCalendarEvents(subscriptionId, events)
+  })
 }
 
 /**

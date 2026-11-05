@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { addDays, addMonths, addWeeks, eachDayOfInterval, endOfMonth, endOfWeek, format, getDaysInMonth, isSameMonth, isToday, startOfMonth, startOfWeek } from 'date-fns'
-import { Check, ChevronLeft, ChevronRight, ChevronsUpDown, Plus } from 'lucide-react'
+import { Check, CalendarDays, ChevronLeft, ChevronRight, ChevronsUpDown, Plus } from 'lucide-react'
 import { zhCN } from 'date-fns/locale'
 import { useStore } from '../store'
 import { parseLocalDate } from '../lib/format'
 import { calendarAnnotation } from '../lib/lunar'
+import { eventDayKeys, eventTimeLabel, type ExternalCalendarEvent } from '../lib/calendar-events'
 import type { Task } from '@shared/types'
 import { WeekView } from './WeekView'
 import '../lunar.css'
@@ -45,11 +46,12 @@ function clampAgendaHeight(value: number, max: number): number {
 }
 
 export function CalendarView(): React.JSX.Element {
-  const { tasks, selected, selectTask, toggleTask, openQuickAdd, updateTask, sidebar, loading, error, refresh, setCalendarRange } = useStore()
+  const { tasks, selected, selectTask, toggleTask, openQuickAdd, updateTask, sidebar, loading, error, refresh, setCalendarRange, setCalendarDate } = useStore()
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [mode, setMode] = useState<Mode>(() => { const saved=localStorage.getItem('lighttodo.calendarMode'); return saved === 'week' || saved === 'day' ? saved : 'month' })
   const changeMode = (next: Mode): void => { setMode(next); localStorage.setItem('lighttodo.calendarMode', next) }
   const [showDone, setShowDone] = useState(false)
+  const [externalEvents, setExternalEvents] = useState<ExternalCalendarEvent[]>([])
   const [monthKeys, setMonthKeys] = useState<string[]>(() => monthsAround(date))
   const [visibleMonthKey, setVisibleMonthKey] = useState(() => format(parseLocalDate(date), 'yyyy-MM'))
   const preferredHeight = useRef(0)
@@ -85,13 +87,56 @@ export function CalendarView(): React.JSX.Element {
     end: endOfWeek(cursor, { weekStartsOn: 1 })
   }) : [], [date, mode])
 
-  useEffect(() => {
+  const visibleRange = useMemo(() => {
     if (mode === 'month') {
       const first = parseLocalDate(`${monthKeys[0]}-01`)
       const last = parseLocalDate(`${monthKeys[monthKeys.length - 1]}-01`)
-      void setCalendarRange(format(startOfWeek(first, { weekStartsOn: 1 }), 'yyyy-MM-dd'), format(endOfWeek(endOfMonth(last), { weekStartsOn: 1 }), 'yyyy-MM-dd'))
-    } else void setCalendarRange(format(days[0], 'yyyy-MM-dd'), format(days[days.length - 1], 'yyyy-MM-dd'))
-  }, [mode, monthKeys, days, setCalendarRange])
+      return {
+        from: format(startOfWeek(first, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+        to: format(endOfWeek(endOfMonth(last), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+      }
+    }
+    return { from: format(days[0], 'yyyy-MM-dd'), to: format(days[days.length - 1], 'yyyy-MM-dd') }
+  }, [mode, monthKeys, days])
+
+  useEffect(() => {
+    void setCalendarRange(visibleRange.from, visibleRange.to)
+  }, [visibleRange, setCalendarRange])
+
+  useEffect(() => {
+    setCalendarDate(date)
+    return () => setCalendarDate(null)
+  }, [date, setCalendarDate])
+
+  // 订阅日程只读：随可见范围拉取，设置里同步/清除后事件会重新加载。
+  useEffect(() => {
+    let cancelled = false
+    const load = (): void => {
+      window.api.calendar.getEvents(visibleRange.from, visibleRange.to)
+        .then((events) => { if (!cancelled) setExternalEvents(events) })
+        .catch(() => { if (!cancelled) setExternalEvents([]) })
+    }
+    load()
+    window.addEventListener('lighttodo:calendar-changed', load)
+    return () => {
+      cancelled = true
+      window.removeEventListener('lighttodo:calendar-changed', load)
+    }
+  }, [visibleRange.from, visibleRange.to])
+
+  const eventsByDay = useMemo(() => {
+    const map = new Map<string, ExternalCalendarEvent[]>()
+    for (const event of externalEvents) {
+      for (const key of eventDayKeys(event)) {
+        if (!map.has(key)) map.set(key, [])
+        map.get(key)!.push(event)
+      }
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => Number(b.allDay) - Number(a.allDay) || a.startAt.localeCompare(b.startAt))
+    }
+    return map
+  }, [externalEvents])
 
   const scrollMonthIntoView = (monthKey: string): void => {
     const el = monthScroll.current
@@ -321,12 +366,21 @@ export function CalendarView(): React.JSX.Element {
   const monthCell = (d: Date, monthDate: Date): React.JSX.Element => {
     const key = format(d, 'yyyy-MM-dd')
     const list = byDay.get(key) ?? []
-    const visible = visibleMonthItems(list.length)
+    const dayEvents = eventsByDay.get(key) ?? []
+    const total = list.length + dayEvents.length
+    const visible = visibleMonthItems(total)
+    const shownEvents = dayEvents.slice(0, Math.min(dayEvents.length, visible))
+    const shownTasks = list.slice(0, Math.max(0, visible - shownEvents.length))
     const lunar = calendarAnnotation(d)
-    return <div key={key} role="gridcell" aria-selected={key === date} aria-label={`${key}，${lunar}，${list.length}项任务`} tabIndex={key === date ? 0 : -1} data-date={key} className={`cal-cell ${isSameMonth(d,monthDate) ? '' : 'dim'} ${isToday(d) ? 'today' : ''} ${key === date ? 'selected-day' : ''}`} onClick={() => choose(key)} onDoubleClick={() => openQuickAdd('',key)} onDragOver={e => e.preventDefault()} onDrop={async e => {e.preventDefault(); const id=e.dataTransfer.getData('text/lighttodo-task'); if(id && tasks.some(t => t.id === id)) {choose(key); await updateTask(id,{scheduledDate:key})}}}>
+    return <div key={key} role="gridcell" aria-selected={key === date} aria-label={`${key}，${lunar}，${list.length}项任务${dayEvents.length ? `，${dayEvents.length}个日程` : ''}`} tabIndex={key === date ? 0 : -1} data-date={key} className={`cal-cell ${isSameMonth(d,monthDate) ? '' : 'dim'} ${isToday(d) ? 'today' : ''} ${key === date ? 'selected-day' : ''}`} onClick={() => choose(key)} onDoubleClick={() => openQuickAdd('',key)} onDragOver={e => e.preventDefault()} onDrop={async e => {e.preventDefault(); const id=e.dataTransfer.getData('text/lighttodo-task'); if(id && tasks.some(t => t.id === id)) {choose(key); await updateTask(id,{scheduledDate:key})}}}>
       <div className="cal-date"><span>{d.getDate()}</span><small className="cal-lunar">{lunar}</small></div>
       <div className="cal-items">
-        {list.slice(0, visible).map(t => {
+        {shownEvents.map(e => <div key={e.id} className="cal-item external" title={`${eventTimeLabel(e)} ${e.title}`}>
+          <CalendarDays size={10} className="cal-ext-icon"/>
+          <span className="cal-title">{e.title}</span>
+          {!e.allDay && <time>{eventTimeLabel(e)}</time>}
+        </div>)}
+        {shownTasks.map(t => {
           const dueTime = t.dueAt ? new Date(t.dueAt) : null
           const showTime = !!dueTime && !Number.isNaN(dueTime.getTime()) && !t.dueAllDay
           return <button key={t.id} draggable onDragStart={e => e.dataTransfer.setData('text/lighttodo-task',t.id)} className={`cal-item ${t.status === 1 ? 'done' : ''} ${selected?.id === t.id ? 'active' : ''}`} data-p={t.priority} style={{'--task-color': colorOf(t)} as React.CSSProperties} onClick={e => {e.stopPropagation(); setDate(key); selectTask(t.id)}} onDoubleClick={e => e.stopPropagation()} title={`${showTime ? format(dueTime!,'HH:mm') + ' ' : ''}${t.title}`}>
@@ -335,7 +389,7 @@ export function CalendarView(): React.JSX.Element {
           {showTime && <time>{format(dueTime!,'HH:mm')}</time>}
         </button>})}
       </div>
-      {list.length > visible && <span className="cal-more" title="点击日期在下方查看全部">还有 {list.length - visible} 项…</span>}
+      {total > visible && <span className="cal-more" title="点击日期在下方查看全部">还有 {total - visible} 项…</span>}
     </div>
   }
 
@@ -373,6 +427,7 @@ export function CalendarView(): React.JSX.Element {
   }
 
   const headingDate = mode === 'month' ? parseLocalDate(`${visibleMonthKey}-01`) : cursor
+  const dayEvents = eventsByDay.get(date) ?? []
 
   return <section ref={mainRef} className={`main calendar-main calendar-${mode} ${resizing ? 'is-resizing' : ''}`}>
     <header className="calendar-toolbar">
@@ -401,11 +456,20 @@ export function CalendarView(): React.JSX.Element {
         })}
       </div>
     </div>}
-    {mode === 'week' && <WeekView days={days} date={date} byDay={byDay} choose={choose} select={id => selectTask(id)} add={openQuickAdd} move={async (id, key) => { if (tasks.some(t => t.id === id)) { choose(key); await updateTask(id, {scheduledDate:key}) } }} colorOf={colorOf} selectedId={selected?.id} />}
+    {mode === 'week' && <WeekView days={days} date={date} byDay={byDay} eventsByDay={eventsByDay} choose={choose} select={id => selectTask(id)} add={openQuickAdd} move={async (id, key) => { if (tasks.some(t => t.id === id)) { choose(key); await updateTask(id, {scheduledDate:key}) } }} colorOf={colorOf} selectedId={selected?.id} />}
     {mode !== 'day' && <div className="calendar-splitter" role="separator" aria-orientation="horizontal" aria-label="调整日历和任务列表高度" aria-controls="calendar-agenda" aria-valuemin={MIN_AGENDA_HEIGHT} aria-valuemax={maxHeight} aria-valuenow={agendaHeight} aria-valuetext={`任务区高度 ${agendaHeight} 像素`} tabIndex={0} title="拖动调整任务区高度 · 双击恢复默认" onPointerDown={startResize} onDoubleClick={resetAgendaHeight} onKeyDown={splitterKey}><span><ChevronsUpDown size={13}/></span></div>}
-    <section id="calendar-agenda" className="calendar-agenda" aria-label="当天任务" style={{ '--agenda-height': `${agendaHeight}px` } as React.CSSProperties}>
-      <div className="agenda-head"><div><h2>{format(cursor,'M月d日 EEEE',{locale:zhCN})}{isToday(cursor) && <em>今天</em>}</h2><span>{pending} 项待办{showDone ? ` · ${items.length-pending} 项已完成` : ''}</span></div><button className="primary-btn" onClick={() => openQuickAdd('',date)}><Plus size={14}/>添加任务</button></div>
-      <div className="agenda-list" ref={agendaList}>{items.length ? <div style={{ height: virtualAgenda.getTotalSize(), position: 'relative' }}>{virtualAgenda.getVirtualItems().map(row => <div key={row.key} style={{ position: 'absolute', top: row.start, left: 0, width: '100%', height: row.size }}>{taskRow(items[row.index])}</div>)}</div> : <div className="agenda-empty"><span>{loading ? '正在加载这个日期的任务…' : `这一天还没有${showDone ? '' : '待办'}任务`}</span>{!loading && <button className="ghost-btn" onClick={() => openQuickAdd('',date)}>为这一天添加安排</button>}</div>}</div>
+    <section id="calendar-agenda" className="calendar-agenda" aria-label="当天任务与日程" style={{ '--agenda-height': `${agendaHeight}px` } as React.CSSProperties}>
+      <div className="agenda-head"><div><h2>{format(cursor,'M月d日 EEEE',{locale:zhCN})}{isToday(cursor) && <em>今天</em>}</h2><span>{pending} 项待办{dayEvents.length ? ` · ${dayEvents.length} 个日程` : ''}{showDone ? ` · ${items.length-pending} 项已完成` : ''}</span></div><button className="primary-btn" onClick={() => openQuickAdd('',date)}><Plus size={14}/>添加任务</button></div>
+      <div className="agenda-list" ref={agendaList}>
+        {dayEvents.length > 0 && <div className="agenda-external" aria-label="订阅日程">
+          {dayEvents.map(event => <div key={event.id} className="agenda-row external" title={event.title}>
+            <span className="agenda-ext-icon" aria-hidden="true"><CalendarDays size={13}/></span>
+            <div className="agenda-task agenda-ext-main"><span className="agenda-title">{event.title}</span><span className="agenda-meta">订阅日程</span></div>
+            <time>{eventTimeLabel(event)}</time>
+          </div>)}
+        </div>}
+        {items.length ? <div style={{ height: virtualAgenda.getTotalSize(), position: 'relative' }}>{virtualAgenda.getVirtualItems().map(row => <div key={row.key} style={{ position: 'absolute', top: row.start, left: 0, width: '100%', height: row.size }}>{taskRow(items[row.index])}</div>)}</div> : <div className="agenda-empty"><span>{loading ? '正在加载这个日期的任务…' : `这一天还没有${showDone ? '' : '待办'}任务`}</span>{!loading && <button className="ghost-btn" onClick={() => openQuickAdd('',date)}>为这一天添加安排</button>}</div>}
+      </div>
     </section>
   </section>
 }

@@ -167,14 +167,15 @@ export function getLunarInfo(date: Date): LunarInfo {
   const month = Math.max(1, LUNAR_MONTHS.indexOf(monthName) + 1)
   const day = Math.min(30, Math.max(1, Number.isFinite(rawDay) ? rawDay : 1))
   const dayName = LUNAR_DAYS[day - 1] ?? `第${day}天`
-  const festival = LUNAR_FESTIVALS[`${month}-${day}`] ?? null
+  // 闰月里的同月同日不是固定农历节日（如闰二月初二不是龙抬头）。
+  const festival = isLeap ? null : LUNAR_FESTIVALS[`${month}-${day}`] ?? null
 
   return {
     month,
     day,
     monthName,
     dayName,
-    text: festival ?? (day === 1 ? monthName : dayName),
+    text: festival ?? (day === 1 ? (isLeap ? `闰${monthName}` : monthName) : dayName),
     festival,
     isLeap
   }

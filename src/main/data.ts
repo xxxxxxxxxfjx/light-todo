@@ -12,6 +12,7 @@ import {
 import { basename, join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { checkpoint, clearCompleted, closeDb, getAllData, getDataDir, initDb } from './db'
+import { removeDatabaseSidecars, swapDatabaseFile, validateDatabaseFile, type DatabaseSwap } from './db-file'
 import { buildIcs, buildTaskCsv } from './export'
 import { importFromText } from './import'
 import { buildMarkdown } from './markdown'
@@ -86,40 +87,67 @@ export function registerDataIpc(): void {
   ipcMain.handle('data:clearCompleted', () => clearCompleted())
   ipcMain.handle('data:restoreBackup', (_e, name: string) => {
     const dataDir = getDataDir()
-    let closed = false
     const tmp = join(dataDir, 'lighttodo.db.restore-tmp')
+    let closed = false
+    let swap: DatabaseSwap | null = null
     try {
       const safe = basename(name)
       const src = join(dataDir, 'backups', safe)
-      if (!existsSync(src)) return { ok: false, message: '备份文件不存在' }
-      if (statSync(src).size === 0) return { ok: false, message: '备份文件为空或已损坏' }
-      // Copy to a staging file first so an unreadable backup never closes the
-      // live database or leaves the app in a half-restored state.
+      // 先校验源备份，再复制到 staged 文件二次校验；任何一步失败都不碰正式库。
+      const sourceCheck = validateDatabaseFile(src)
+      if (!sourceCheck.ok) return { ok: false, message: sourceCheck.message }
       copyFileSync(src, tmp)
-      const launcher = join(process.execPath, '..', 'LightTodo.exe')
-      backupNow('pre-restore')
+      const stagedCheck = validateDatabaseFile(tmp)
+      if (!stagedCheck.ok) return { ok: false, message: stagedCheck.message }
+
+      const preRestore = backupNow('pre-restore')
+      if (!preRestore) return { ok: false, message: '无法创建恢复前备份，已取消恢复' }
+
+      const dest = join(dataDir, 'lighttodo.db')
       closeDb()
       closed = true
-      const dest = join(dataDir, 'lighttodo.db')
-      copyFileSync(tmp, dest)
-      for (const suffix of ['-wal', '-shm']) {
-        const p = dest + suffix
-        if (existsSync(p)) unlinkSync(p)
-      }
+      removeDatabaseSidecars(dest)
+      swap = swapDatabaseFile(tmp, dest)
+      // 新库要能完成迁移并打开，才算恢复成功；否则回滚到恢复前文件。
       initDb(dataDir)
       closed = false
-      app.relaunch({ execPath: app.isPackaged && existsSync(launcher) ? launcher : process.execPath })
+      swap.commit()
+      swap = null
+
+      const launcher = join(process.execPath, '..', 'LightTodo.exe')
+      if (process.platform === 'darwin') {
+        // macOS 的 .app 由系统管理 bundle；交给 Electron 用当前可执行文件重启。
+        app.relaunch()
+      } else {
+        // 开发模式下 Electron 需要显式带上应用目录和启动参数，否则重启后只会打开空 Electron。
+        app.relaunch(app.isPackaged
+          ? { execPath: existsSync(launcher) ? launcher : process.execPath }
+          : { execPath: process.execPath, args: process.argv.slice(1) })
+      }
       app.exit(0)
       return { ok: true }
     } catch (e) {
-      if (closed) {
+      if (swap) {
+        try {
+          closeDb()
+          swap.rollback()
+          initDb(dataDir)
+          closed = false
+        } catch (rollbackError) {
+          return {
+            ok: false,
+            message: `恢复失败且回滚失败：${e instanceof Error ? e.message : String(e)}；${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
+          }
+        }
+      } else if (closed) {
         try {
           initDb(dataDir)
+          closed = false
         } catch {
           /* reported below */
         }
       }
-      return { ok: false, message: String(e) }
+      return { ok: false, message: `恢复失败：${e instanceof Error ? e.message : String(e)}` }
     } finally {
       try {
         if (existsSync(tmp)) unlinkSync(tmp)
@@ -200,6 +228,30 @@ export function registerDataIpc(): void {
     notifyTaskWindows()
     return result
   })
+  // macOS/Linux 使用 Electron 登录项；Windows 另写 HKCU Run 作为双保险。
+  if (process.platform !== 'win32') {
+    ipcMain.handle('app:getLoginItem', () => {
+      try {
+        return app.getLoginItemSettings().openAtLogin
+      } catch {
+        return false
+      }
+    })
+    ipcMain.handle('app:setLoginItem', (_e, enabled: boolean) => {
+      try {
+        app.setLoginItemSettings({ openAtLogin: enabled })
+      } catch {
+        /* 受系统策略限制时返回实际状态 */
+      }
+      try {
+        return app.getLoginItemSettings().openAtLogin
+      } catch {
+        return false
+      }
+    })
+    return
+  }
+
   // Windows 自启直接写 HKCU Run，避免 Electron API 的 path/args 匹配问题
   const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
   const launcher = join(process.execPath, '..', 'LightTodo.exe')

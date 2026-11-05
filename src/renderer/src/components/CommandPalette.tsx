@@ -13,6 +13,7 @@ import {
   Trash2
 } from 'lucide-react'
 import { useStore } from '../store'
+import { modKey } from '../lib/platform'
 import type { ViewKey } from '@shared/types'
 
 type CommandItem = {
@@ -55,8 +56,8 @@ export function CommandPalette({
 
   const commands = useMemo<CommandItem[]>(() => {
     const list: CommandItem[] = [
-      { id: 'new', label: '新建任务', hint: 'Ctrl+N', icon: Plus, run: () => openQuickAdd() },
-      { id: 'search', label: '搜索任务', hint: 'Ctrl+F', icon: Search, run: () => openSearch() },
+      { id: 'new', label: '新建任务', hint: modKey('N'), icon: Plus, run: () => openQuickAdd() },
+      { id: 'search', label: '搜索任务', hint: modKey('F'), icon: Search, run: () => openSearch() },
       {
         id: 'settings',
         label: '打开设置',

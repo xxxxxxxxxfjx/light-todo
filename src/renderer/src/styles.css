@@ -1,7 +1,7 @@
 :root {
   color-scheme: light dark;
-  --font: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', system-ui, sans-serif;
-  --font-display: 'Segoe UI Variable Display', 'Segoe UI Semibold', 'Microsoft YaHei UI', sans-serif;
+  --font: 'Segoe UI Variable Text', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei UI', system-ui, sans-serif;
+  --font-display: 'Segoe UI Variable Display', 'Segoe UI Semibold', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei UI', sans-serif;
   --text: #1a1a1f;
   --text-2: #5c5c67;
   --text-3: #8b8b96;
@@ -132,6 +132,8 @@ button {
   -webkit-app-region: drag;
   user-select: none;
 }
+/* macOS 的红绿灯在左侧：给原生窗口按钮留出位置，右侧不再为 Windows 控件留白。 */
+:root[data-platform='darwin'] .titlebar { padding: 0 14px 0 78px; }
 
 .brand {
   display: flex;
@@ -1964,6 +1966,9 @@ select:focus-visible {
 .calendar-main .cal-item time { display:none; margin-left:auto; flex:none; font-size:9.5px; color:var(--text-3); font-variant-numeric:tabular-nums; }
 .calendar-main .cal-item.done { opacity:.48; }
 .calendar-main .cal-item.done .cal-title { text-decoration:line-through; }
+.calendar-main .cal-item.external { color:#6d4bd8; }
+.calendar-main .cal-item.external:hover { background:color-mix(in srgb,#7c5cff 10%, transparent); }
+.calendar-main .cal-ext-icon { color:#7c5cff; flex:none; }
 .calendar-main .cal-more { flex:none; height:12px; line-height:12px; padding:0 4px; border:0; background:none; color:var(--text-3); font-size:10px; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
 /* Splitter between the calendar canvas and the agenda. */
@@ -1991,6 +1996,11 @@ body.calendar-resizing, body.calendar-resizing * { cursor:row-resize !important;
 .agenda-title { flex:1 1 auto; min-width:0; font-size:12.5px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .agenda-meta { flex:0 1 auto; max-width:34%; font-size:10.5px; color:var(--text-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .agenda-row > time { flex:none; font-size:10.5px; color:var(--text-3); font-variant-numeric:tabular-nums; }
+.agenda-row.external { cursor:default; }
+.agenda-row.external:hover { background:transparent; }
+.agenda-ext-icon { display:grid; place-items:center; width:20px; height:20px; flex:none; border-radius:6px; color:#7c5cff; background:color-mix(in srgb,#7c5cff 12%, transparent); }
+.agenda-ext-main { cursor:default; }
+.agenda-ext-main .agenda-title { color:var(--text); }
 .agenda-empty { display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px; min-height:90px; color:var(--text-3); font-size:12px; }
 .calendar-day .calendar-agenda { flex:1 1 auto; min-height:0; }
 .calendar-day .agenda-row, .calendar-day .agenda-task { min-height:46px; height:46px; }
@@ -2018,6 +2028,12 @@ body.calendar-resizing, body.calendar-resizing * { cursor:row-resize !important;
 .week-task time { flex:none; font-size:9px; color:var(--text-3); }
 .week-task.done { opacity:.48; }
 .week-task.done span { text-decoration:line-through; }
+.week-task.external { color:#6d4bd8; cursor:default; }
+.week-task.external:hover { background:color-mix(in srgb,#7c5cff 8%, transparent); }
+.week-ext-icon { color:#7c5cff; flex:none; }
+.week-ext-event { position:absolute; left:4px; right:4px; z-index:1; display:flex; align-items:flex-start; gap:4px; padding:2px 5px; border-radius:5px; border-left:2px solid #7c5cff; background:color-mix(in srgb,#7c5cff 12%, var(--surface)); color:#5d3fcf; font-size:10px; line-height:14px; overflow:hidden; pointer-events:none; }
+.week-ext-event span { flex:1 1 auto; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.week-ext-event time { flex:none; font-size:9px; opacity:.75; font-variant-numeric:tabular-nums; }
 .week-more { flex:none; height:14px; line-height:14px; padding:0 3px; font-size:10px; color:var(--text-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .week-timeline { position:relative; }
 .week-hours { position:sticky; left:0; z-index:4; background:var(--surface); }

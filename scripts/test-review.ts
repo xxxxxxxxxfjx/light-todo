@@ -76,6 +76,10 @@ const activeTomorrow = createTask({
   listId: life.id,
   scheduledDate: dayKey(1)
 })
+// 子任务只属于父任务：周复盘统一按顶层任务统计，下面三条用于锁定口径。
+const activeChild = createTask({ title: '进行中子任务', parentId: activeToday.id, listId: work.id })
+const activeChild2 = createTask({ title: '另一个子任务', parentId: activeTomorrow.id, listId: life.id })
+const doneChild = createTask({ title: '已完成子任务', parentId: completedToday.id, listId: work.id })
 
 const raw = new DatabaseSync(dbPath())
 const setCreated = raw.prepare('UPDATE tasks SET created_at = ? WHERE id = ?')
@@ -98,6 +102,10 @@ setCompleted.run(localIso(0, 11), deletedCompleted.id)
 setCreated.run(localIso(-8, 9), completedOutside.id)
 setCompleted.run(localIso(-8, 12), completedOutside.id)
 setCreated.run(localIso(-1, 18, 45), activeTomorrow.id)
+setCreated.run(localIso(0, 9, 5), activeChild.id)
+setCreated.run(localIso(0, 9, 6), activeChild2.id)
+setCreated.run(localIso(0, 9, 7), doneChild.id)
+setCompleted.run(localIso(0, 9, 30), doneChild.id)
 // 归档清单不属于当前清单导航，其任务应进入“未分类”分布。
 raw.prepare('UPDATE lists SET archived_at = ? WHERE id = ?').run(localIso(0, 12), archived.id)
 raw.close()
@@ -138,7 +146,7 @@ assert.equal(
   review.completed
 )
 assert.equal(review.days.reduce((sum, day) => sum + day.created, 0), review.created)
-console.log('PASS completed / created / overdue / active 汇总')
+console.log('PASS completed / created / overdue / active 汇总（仅顶层任务）')
 
 // 4) 清单分布、未知 listId -> 未分类、归档清单排除、按完成数降序。
 const workStats = review.lists.find((list) => list.id === work.id)

@@ -31,14 +31,30 @@ const port = Number(opt('port', '9222'))
 const dataDir = resolve(ROOT, opt('data', '.tmp/e2e/playwright'))
 const packaged = flag('packaged') || argv.includes('--exe')
 const pidFile = join(dataDir, 'app.pid')
+const isWin = process.platform === 'win32'
 
 function killPrevious() {
-  if (!existsSync(pidFile)) return false
-  const pid = Number(readFileSync(pidFile, 'utf8').trim())
-  if (!pid) return false
-  spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' })
-  rmSync(pidFile, { force: true })
-  return true
+  let killed = false
+  if (existsSync(pidFile)) {
+    const pid = Number(readFileSync(pidFile, 'utf8').trim())
+    if (pid) {
+      if (isWin) {
+        spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' })
+      } else {
+        try { process.kill(pid, 'SIGTERM') } catch { /* 进程已经退出 */ }
+      }
+      killed = true
+    }
+    rmSync(pidFile, { force: true })
+  }
+  // macOS 的 app.relaunch / 崩溃恢复会产生不在 pid 文件里的实例；
+  // 按项目内 Electron 可执行文件路径兜底清理，避免单实例锁和旧 bundle 混用。
+  if (process.platform === 'darwin') {
+    const result = spawnSync('pkill', ['-f', join(ROOT, 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron')], { stdio: 'ignore' })
+    killed = killed || result.status === 0
+    if (killed) spawnSync('sh', ['-c', 'sleep 0.6'], { stdio: 'ignore' })
+  }
+  return killed
 }
 
 if (flag('kill')) {
@@ -56,7 +72,9 @@ mkdirSync(dataDir, { recursive: true })
 
 const exe = argv.includes('--exe') ? resolve(ROOT, opt('exe', '')) : packaged
   ? join(ROOT, 'release', 'win-unpacked', 'LightTodo.exe')
-  : join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe')
+  : process.platform === 'darwin'
+    ? join(ROOT, 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron')
+    : join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe')
 if (!existsSync(exe)) {
   console.error(`找不到可执行文件：${exe}`)
   process.exit(1)

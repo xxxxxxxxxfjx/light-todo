@@ -5,6 +5,7 @@ import { addDays, format } from 'date-fns'
 import { dateLabel, parseLocalDate } from '../lib/format'
 import { repeatLabel } from '../lib/repeat'
 import { useStore } from '../store'
+import { mod } from '../lib/platform'
 
 function Chip({
   icon: Icon,
@@ -225,7 +226,7 @@ export function QuickAdd(): React.JSX.Element {
             <kbd>Enter</kbd> 保存
           </span>
           <span>
-            <kbd>Ctrl</kbd> + <kbd>Enter</kbd> 继续添加
+            <kbd>{mod}</kbd> + <kbd>Enter</kbd> 继续添加
           </span>
           <span>
             <kbd>Esc</kbd> 取消

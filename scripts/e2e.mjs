@@ -9,7 +9,9 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 const ROOT = process.cwd()
-const EXE = join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe')
+const EXE = process.platform === 'darwin'
+  ? join(ROOT, 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron')
+  : join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe')
 const E2E_DIR = join(ROOT, '.tmp', 'e2e', 'main')
 const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
 
@@ -33,6 +35,7 @@ function one(db, sql, ...params) {
 const setText = (selector, text, kind = 'textarea') => `(() => {
   const el = document.querySelector(${JSON.stringify(selector)});
   if (!el) return 'NO_ELEMENT';
+  el.focus();
   const proto = window.${kind === 'input' ? 'HTMLInputElement' : 'HTMLTextAreaElement'}.prototype;
   const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
   setter.call(el, ${JSON.stringify(text)});
@@ -350,7 +353,7 @@ await runScenario(
     },
     { js: clickText('.list-actions button', '重命名'), wait: 600 },
     { js: setText('.list-row .inline-input', '工作改名', 'input'), wait: 400 },
-    { js: `document.querySelector('.list-row .inline-input')?.blur()`, wait: 1200 }
+    { js: `document.querySelector('.list-row .inline-input')?.dispatchEvent(new FocusEvent('focusout',{bubbles:true}))`, wait: 1200 }
   ],
   ({ db }) => {
     const l = one(db, `SELECT * FROM lists WHERE name = '工作改名'`)
@@ -543,7 +546,7 @@ await runScenario(
       wait: 600
     },
     { js: setText('.tag-manage-row .inline-input', '出差', 'input'), wait: 300 },
-    { js: `document.querySelector('.tag-manage-row .inline-input')?.blur()`, wait: 1300 },
+    { js: `document.querySelector('.tag-manage-row .inline-input')?.dispatchEvent(new FocusEvent('focusout',{bubbles:true}))`, wait: 1300 },
     { js: `(() => { window.confirm = () => true; return 'OK' })()`, wait: 50 },
     {
       js: `(() => { const row = [...document.querySelectorAll('.tag-manage-row')].find((r) => r.textContent.includes('出差')); row?.querySelector('.mini-btn.danger')?.click(); return row ? 'OK' : 'NO_ROW' })()`,
@@ -583,7 +586,7 @@ await runScenario(
   }
 )
 
-await runScenario(
+if (process.platform === 'win32') await runScenario(
   'autostart-read',
   [
     { js: `document.querySelector('.sb-foot .nav-item').click()`, wait: 700 },
@@ -759,8 +762,9 @@ await runScenario(
     { js: `({ search: !!document.querySelector('.search-panel'), label: document.querySelector('.titlebar-search kbd')?.textContent })`, wait: 100 }
   ],
   ({ out }) => {
-    assert(out.results[1].search === true, 'Ctrl+F 应打开搜索面板')
-    assert(out.results[1].label === 'Ctrl F', '搜索入口应显示 Ctrl F')
+    assert(out.results[1].search === true, 'Ctrl/Cmd+F 应打开搜索面板')
+    const expected = process.platform === 'darwin' ? '⌘F' : 'Ctrl F'
+    assert(out.results[1].label === expected, `搜索入口应显示 ${expected}`)
   }
 )
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { CalendarDays, Check, Flag, ListTodo, Moon, Plus, Repeat, Trash2, X } from 'lucide-react'
 import { useStore } from '../store'
+import { mod, modKey } from '../lib/platform'
 import { humanDate, isoToLocalInput, localInputToIso, todayStr } from '../lib/format'
 import type { Task } from '@shared/types'
 import { repeatLabel } from '../lib/repeat'
@@ -403,13 +404,13 @@ function Overview(): React.JSX.Element {
           <div className="ov-tip-title">快速上手</div>
           <ul>
             <li>
-              <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> 全局记一条
+              <kbd>{mod}</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> 全局记一条
             </li>
             <li>
               输入 <code>明天下午3点 交周报 #工作 @汇报 !高</code>
             </li>
             <li>
-              <kbd>Space</kbd> 完成选中任务，<kbd>Ctrl</kbd> + <kbd>F</kbd> 搜索
+              <kbd>Space</kbd> 完成选中任务，<kbd>{modKey('F')}</kbd> 搜索
             </li>
           </ul>
         </div>

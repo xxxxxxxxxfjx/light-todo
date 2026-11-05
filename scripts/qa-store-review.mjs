@@ -5,7 +5,8 @@ const asUrl=s=>'data:text/javascript;base64,'+Buffer.from(s).toString('base64')
 import {mkdirSync,readFileSync} from 'node:fs'
 mkdirSync('.tmp/qa/review',{recursive:true})
 const filterUrl=asUrl(transpile(readFileSync('src/renderer/src/lib/task-filter.ts','utf8')).replace("from 'date-fns'", "from '"+import.meta.resolve('date-fns')+"'"))
-const storeUrl=asUrl(transpile(readFileSync('src/renderer/src/store.ts','utf8')).replace("from 'zustand'", "from '"+import.meta.resolve('zustand')+"'").replace("from './lib/task-filter'", "from '"+filterUrl+"'"))
+const quickAddDateUrl=asUrl(transpile(readFileSync('src/renderer/src/lib/quick-add-date.ts','utf8')))
+const storeUrl=asUrl(transpile(readFileSync('src/renderer/src/store.ts','utf8')).replace("from 'zustand'", "from '"+import.meta.resolve('zustand')+"'").replace("from './lib/task-filter'", "from '"+filterUrl+"'").replace("from './lib/quick-add-date'", "from '"+quickAddDateUrl+"'"))
 const pending=[]
 globalThis.window={api:{tasks:{list:()=>new Promise(resolve=>pending.push(resolve)),get:async(id)=>({id})}}}
 const {useStore}=await import(storeUrl)

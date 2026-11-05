@@ -16,6 +16,7 @@ import {
   X
 } from 'lucide-react'
 import { useStore } from '../store'
+import { globalCaptureLabel, modKey } from '../lib/platform'
 import { DEFAULT_PET_SETTINGS, type PetSettings } from '@shared/pet'
 import { DEFAULT_ISLAND_SETTINGS, ISLAND_ACCENTS, type IslandAccent, type IslandSettings } from '@shared/island'
 import { Mascot } from '../pet/Mascot'
@@ -551,7 +552,7 @@ export function SettingsModal(): React.JSX.Element {
         </div>
 
         <div className="settings-foot">
-          <span className="set-hint">快捷键：Ctrl+Shift+Space 记一条 · Ctrl+F 搜索</span>
+          <span className="set-hint">快捷键：{globalCaptureLabel} 记一条 · {modKey('F')} 搜索</span>
           <button className="primary-btn" onClick={closeSettings}>
             完成
           </button>
