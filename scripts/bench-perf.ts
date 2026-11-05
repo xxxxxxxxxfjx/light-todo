@@ -14,7 +14,7 @@
  *
  * Run from the repository root:
  *   node --experimental-strip-types scripts/bench-perf.ts
- *   node --experimental-strip-types scripts/bench-perf.ts --dir .perf-bench --runs 5 --app-runs 3
+ *   node --experimental-strip-types scripts/bench-perf.ts --dir .tmp/perf/bench --runs 5 --app-runs 3
  *
  * Only Node built-ins and existing project dependencies are used.
  */
@@ -104,14 +104,14 @@ function safePathInsideRepo(relativeOrAbsolute: string, label: string): string {
 if (hasFlag('help') || hasFlag('h')) {
   console.log(`Usage: node --experimental-strip-types scripts/bench-perf.ts [options]
 
-  --dir <path>          benchmark data directory (default: .perf-bench)
+  --dir <path>          benchmark data directory (default: .tmp/perf/bench)
   --runs <n>            DB measured runs after one warm-up (default: 5)
   --app-runs <n>        app launches for cold-start samples (default: 3)
   --target-rows <n>     load-more ceiling, capped by active tasks (default: 10000)
   --fps-duration <ms>   scroll measurement window (default: 2000)
   --port <n>            fixed CDP port; default picks a free loopback port
   --electron <path>     electron.exe (default: node_modules/electron/dist/electron.exe)
-  --json <path>         JSON output path; default .perf-results/<timestamp>.json
+  --json <path>         JSON output path; default .tmp/perf/results/<timestamp>.json
   --md <path>           Markdown output path; default beside JSON
   --skip-db             skip database benchmarks
   --skip-app            skip Electron/CDP benchmarks
@@ -119,7 +119,7 @@ if (hasFlag('help') || hasFlag('h')) {
   process.exit(0)
 }
 
-const DATA_DIR = safePathInsideRepo(argValue('dir', '.perf-bench'), '--dir')
+const DATA_DIR = safePathInsideRepo(argValue('dir', '.tmp/perf/bench'), '--dir')
 const RUNS = numberArg('runs', 5, 1, 100)
 const APP_RUNS = numberArg('app-runs', 3, 1, 10)
 const TARGET_ROWS = numberArg('target-rows', 10000, 1, 100000)
@@ -131,7 +131,7 @@ const SKIP_APP = hasFlag('skip-app')
 const ELECTRON_EXE = resolve(ROOT, argValue('electron', join('node_modules', 'electron', 'dist', 'electron.exe')))
 
 const stamp = STARTED_AT.toISOString().replace(/[:.]/g, '-')
-const RESULT_DIR = join(ROOT, '.perf-results')
+const RESULT_DIR = join(ROOT, '.tmp', 'perf', 'results')
 const jsonArg = argValue('json', '')
 const mdArg = argValue('md', '')
 const JSON_PATH = jsonArg
@@ -147,7 +147,7 @@ if (!existsSync(join(DATA_DIR, 'lighttodo.db'))) {
   fail(
     `database not found at ${join(DATA_DIR, 'lighttodo.db')}; run ` +
       'node --experimental-strip-types scripts/seed-bench-10k.ts --dir ' +
-      argValue('dir', '.perf-bench')
+      argValue('dir', '.tmp/perf/bench')
   )
 }
 

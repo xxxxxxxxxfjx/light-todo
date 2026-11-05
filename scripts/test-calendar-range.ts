@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import * as db from '../src/main/db.ts'
 
-const directory = mkdtempSync(join(process.cwd(), '.qa-calendar-range-'))
+mkdirSync(join(process.cwd(), '.tmp', 'qa'), { recursive: true })
+const directory = mkdtempSync(join(process.cwd(), '.tmp', 'qa', 'calendar-range-'))
 db.initDb(directory)
 try {
   const prefix = 'calendar-range:'

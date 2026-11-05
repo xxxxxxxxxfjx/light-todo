@@ -3,12 +3,12 @@
  * 用 CDP 调试端口启动 LightTodo，供 Playwright MCP（playwright-app 实例）接管窗口。
  *
  * 用法：
- *   node scripts/app-cdp.mjs                 # 启动（默认端口 9222，数据目录 .e2e-playwright）
+ *   node scripts/app-cdp.mjs                 # 启动（默认端口 9222，数据目录 .tmp/e2e/playwright）
  *   node scripts/app-cdp.mjs --fresh         # 先杀旧实例并清空数据目录
  *   node scripts/app-cdp.mjs --packaged      # 启动 release/win-unpacked/LightTodo.exe
  *   node scripts/app-cdp.mjs --exe release/0.2.10/LightTodo-0.2.10-x64.exe
  *   node scripts/app-cdp.mjs --kill          # 结束由本脚本启动的实例
- *   node scripts/app-cdp.mjs --port 9333 --data .e2e-cdp2 --timeout 60000
+ *   node scripts/app-cdp.mjs --port 9333 --data .tmp/e2e/cdp2 --timeout 60000
  *
  * 关键点（DSH 环境）：
  *   - 必须清掉 ELECTRON_RUN_AS_NODE，否则 Electron 会退化成 Node；
@@ -28,7 +28,7 @@ const opt = (name, fallback) => {
 }
 
 const port = Number(opt('port', '9222'))
-const dataDir = resolve(ROOT, opt('data', '.e2e-playwright'))
+const dataDir = resolve(ROOT, opt('data', '.tmp/e2e/playwright'))
 const packaged = flag('packaged') || argv.includes('--exe')
 const pidFile = join(dataDir, 'app.pid')
 

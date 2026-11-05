@@ -1,7 +1,8 @@
+import { join } from 'node:path'
 import { initDb, createTask, setTaskStatus, getLists } from '../src/main/db.ts'
 import { format, addDays } from 'date-fns'
 
-const dir = 'E:\\code\\todo\\.qa-data'
+const dir = join(process.cwd(), '.tmp', 'qa', 'data')
 initDb(dir)
 const lists = getLists()
 const work = lists.find((l) => l.name === '工作')

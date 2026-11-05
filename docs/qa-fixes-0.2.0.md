@@ -46,6 +46,6 @@ QA-10：任务列表和详情忽略过期响应；搜索清理过期查询结果
 - 最终启动器目录版及单文件版均以无手工兼容参数运行通过日历全流程，同时注入ELECTRON_RUN_AS_NODE=1和无效NODE_OPTIONS，验证启动不受其影响。
 - 日历全流程：选择日期不弹添加框；按日期添加；合成态回车不提交；月格与当天列表同步；打开详情；周/日切换；完成、显示已完成及撤销。
 
-截图：`.shots/calendar-0.2.0.png`。
+截图：`.tmp/shots/calendar-0.2.0.png`。
 
 最终产物复核：最后一次源码构建产物包含 index-QKtFmOH9.js / index-DqY6uluP.css；最终单文件exe再次无手工参数通过日历全流程（数据目录 .qa-calendar-release-R1n4eU）。SHA256清单位于 release/0.2.0/SHA256SUMS.txt。

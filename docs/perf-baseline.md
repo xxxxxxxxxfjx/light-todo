@@ -28,11 +28,11 @@
 在仓库根目录执行：
 
 ```powershell
-# 正式数据集：10000 条，默认写入 .perf-bench
-node --experimental-strip-types scripts/seed-bench-10k.ts --dir .perf-bench --count 10000
+# 正式数据集：10000 条，默认写入 .tmp/perf/bench
+node --experimental-strip-types scripts/seed-bench-10k.ts --dir .tmp/perf/bench --count 10000
 
 # 短冒烟：1000 条
-node --experimental-strip-types scripts/seed-bench-10k.ts --dir .perf-bench-smoke --count 1000
+node --experimental-strip-types scripts/seed-bench-10k.ts --dir .tmp/perf/bench-smoke --count 1000
 ```
 
 `--dir` 必须是仓库内、非仓库根目录；脚本拒绝清理 `src/`、`scripts/`、`docs/`、`out/` 等受保护目录。目标目录每次运行会先被删除，再通过 `src/main/db.ts` 的 `initDb()` 建立当前 schema，最后用一个事务写入数据。
@@ -65,7 +65,7 @@ node --experimental-strip-types scripts/seed-bench-10k.ts --dir .perf-bench-smok
 
 ```powershell
 node --experimental-strip-types scripts/bench-perf.ts `
-  --dir .perf-bench `
+  --dir .tmp/perf/bench `
   --runs 5 `
   --app-runs 3 `
   --target-rows 10000 `
@@ -75,27 +75,27 @@ node --experimental-strip-types scripts/bench-perf.ts `
 默认输出：
 
 ```text
-.perf-results/<timestamp>.json
-.perf-results/<timestamp>.md
+.tmp/perf/results/<timestamp>.json
+.tmp/perf/results/<timestamp>.md
 ```
 
 也可指定路径：
 
 ```powershell
-node --experimental-strip-types scripts/bench-perf.ts --dir .perf-bench --json .perf-results/my-run.json
-node --experimental-strip-types scripts/bench-perf.ts --dir .perf-bench --md .perf-results/my-run.md
+node --experimental-strip-types scripts/bench-perf.ts --dir .tmp/perf/bench --json .tmp/perf/results/my-run.json
+node --experimental-strip-types scripts/bench-perf.ts --dir .tmp/perf/bench --md .tmp/perf/results/my-run.md
 ```
 
 ### 3.2 只跑 DB
 
 ```powershell
-node --experimental-strip-types scripts/bench-perf.ts --dir .perf-bench --runs 5 --skip-app
+node --experimental-strip-types scripts/bench-perf.ts --dir .tmp/perf/bench --runs 5 --skip-app
 ```
 
 ### 3.3 只跑应用（用已有数据目录）
 
 ```powershell
-node --experimental-strip-types scripts/bench-perf.ts --dir .perf-bench --skip-db --app-runs 3
+node --experimental-strip-types scripts/bench-perf.ts --dir .tmp/perf/bench --skip-db --app-runs 3
 ```
 
 ### 3.4 其他参数
@@ -180,14 +180,14 @@ TaskList 已接入 `@tanstack/react-virtual`：可见任务 >150 时只挂载窗
 | 内存 | 16GB |
 | Node | v22.20.0 |
 | Electron | 45.2.1 |
-| 数据目录 | `E:\code\todo\.perf-bench` |
+| 数据目录 | `E:\code\todo\.tmp/perf/bench` |
 | 渲染 | 测试参数强制 `--disable-gpu`（软件渲染） |
 | 会话 | DSH 受限 Windows 会话，`SESSIONNAME=Console` |
 
 正式报告文件：
 
-- `.perf-results/db-final-0.3.0.json`
-- `.perf-results/db-final-0.3.0.md`
+- `.tmp/perf/results/db-final-0.3.0.json`
+- `.tmp/perf/results/db-final-0.3.0.md`
 
 ### 5.2 SQLite 基准（10000 条，实测）
 
@@ -203,7 +203,7 @@ TaskList 已接入 `@tanstack/react-virtual`：可见任务 >150 时只挂载窗
 | `searchTasks('会议')` | 60 | 30.658 | 33.943 |
 | `searchTasks('meeting')` | 60 | 30.040 | 30.472 |
 
-另一次 20 次扩展运行（`.perf-results/2026-11-05T05-47-37-605Z.json`）方向一致：`getSidebar` P50 20.8 / P95 28.9ms，`all(10000)` 120.4 / 135.6ms，搜索中英文约 31 / 30ms。
+另一次 20 次扩展运行（`.tmp/perf/results/2026-11-05T05-47-37-605Z.json`）方向一致：`getSidebar` P50 20.8 / P95 28.9ms，`all(10000)` 120.4 / 135.6ms，搜索中英文约 31 / 30ms。
 
 解释：
 
@@ -243,7 +243,7 @@ Check failed: . : 拒绝访问。 (0x5)
 
 因此这不是“未加 `--no-sandbox`”的问题（参数已包含），也不是用 `stdio: 'ignore'` 就能在本会话消除的问题；这是**当前受限会话的 Chromium 子进程/IPC 运行限制**。没有在此环境强行把失败包装成基准数字。需要主会话或干净交互式 Windows 11 会话重跑应用阶段。
 
-应用阶段三次启动的原始尝试报告：`.perf-results/2026-11-05T05-47-37-605Z.json` 与 `.md`。
+应用阶段三次启动的原始尝试报告：`.tmp/perf/results/2026-11-05T05-47-37-605Z.json` 与 `.md`。
 
 要得到这三项的有效数据，必须在允许 GUI 子进程和 Chromium IPC 的干净交互式 Windows 11 会话中重跑 `scripts/bench-perf.ts`（不要用 DSH 的受限命令沙箱）。
 
@@ -271,7 +271,7 @@ Check failed: . : 拒绝访问。 (0x5)
 基准进程由脚本在 `finally` 中通过 `taskkill /PID <root> /T /F` 结束，并等待 CDP 端口关闭。手动清理数据目录时：
 
 ```powershell
-Remove-Item -Recurse -Force .perf-bench, .perf-bench-smoke
+Remove-Item -Recurse -Force .tmp/perf/bench, .tmp/perf/bench-smoke
 ```
 
-`.perf-results/` 中的 JSON/Markdown 是结果证据，按需保留；`.perf-results/.tmp/` 只用于 PowerShell 进程内存采样的临时文件，脚本会自动删除。
+`.tmp/perf/results/` 中的 JSON/Markdown 是结果证据，按需保留；`.tmp/perf/results/.tmp/` 只用于 PowerShell 进程内存采样的临时文件，脚本会自动删除。

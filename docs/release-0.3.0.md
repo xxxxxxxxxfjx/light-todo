@@ -58,8 +58,8 @@
 **未测**：冷启动、常驻内存、10,000 条滚动 FPS、打包版数字。当前 DSH Windows 会话中 Electron 在 `ready-to-show` 前被 Chromium IPC/沙箱限制终止（`platform_channel.cc:112`，退出码 2147483651），不是应用源码错误，也不能用该环境数字冒充干净 Win11 发布基线。需在允许 GUI 子进程和 Chromium IPC 的交互式 Windows 11 会话中重跑：
 
 ```powershell
-node --experimental-strip-types scripts/seed-bench-10k.ts --dir .perf-bench --count 10000
-node --experimental-strip-types scripts/bench-perf.ts --dir .perf-bench --runs 20 --app-runs 5 --target-rows 10000
+node --experimental-strip-types scripts/seed-bench-10k.ts --dir .tmp/perf/bench --count 10000
+node --experimental-strip-types scripts/bench-perf.ts --dir .tmp/perf/bench --runs 20 --app-runs 5 --target-rows 10000
 ```
 
 ## 3. 测试

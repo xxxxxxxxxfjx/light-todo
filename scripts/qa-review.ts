@@ -2,7 +2,7 @@ import * as db from '../src/main/db.ts'
 import { importFromText } from '../src/main/import.ts'
 import { join } from 'node:path'
 
-const dir = join(process.cwd(), '.qa-review', String(Date.now()))
+const dir = join(process.cwd(), '.tmp', 'qa', 'review', String(Date.now()))
 db.initDb(dir)
 const result: Record<string, unknown> = { dataDir: dir }
 const list = db.createList({ name: 'QA列表' })

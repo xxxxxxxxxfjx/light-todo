@@ -2,9 +2,9 @@
 
 ## 测试方式
 
-- 真实 Electron 窗口：`node scripts/app-cdp.mjs --data .qa-walkthrough` + CDP 驱动，逐个点击/输入/拖拽验证。
+- 真实 Electron 窗口：`node scripts/app-cdp.mjs --data .tmp/qa/qa-walkthrough` + CDP 驱动，逐个点击/输入/拖拽验证。
 - 现有自动化：`pnpm test:unit`、`pnpm test:e2e`（34 项）、`pnpm test:flows`（8 条旅程）、`pnpm test:stress`（500 条）、`pnpm test:layout`、`pnpm test:calendar`。
-- 数据断言直接读取 `.e2e*/lighttodo.db` / 测试数据目录下的 SQLite。
+- 数据断言直接读取 `.tmp/e2e/*/lighttodo.db` / `.tmp/qa/*` 测试数据目录下的 SQLite。
 
 ## 已修复
 

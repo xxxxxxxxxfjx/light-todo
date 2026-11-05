@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import * as db from '../src/main/db.ts'
@@ -8,7 +8,9 @@ import { buildMarkdown } from '../src/main/markdown.ts'
 import { parseQuickAdd } from '../src/shared/nlp.ts'
 
 function freshDb(prefix: string): string {
-  const dir = mkdtempSync(join(process.cwd(), prefix))
+  const parent = join(process.cwd(), '.tmp', 'qa')
+  mkdirSync(parent, { recursive: true })
+  const dir = mkdtempSync(join(parent, prefix.replace(/^\./, '')))
   db.initDb(dir)
   return dir
 }

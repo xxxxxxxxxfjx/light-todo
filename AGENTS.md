@@ -7,8 +7,9 @@
   - 独立网页：`mcp__playwright__browser_*`
 - 启动被测应用：`node scripts/app-cdp.mjs --fresh`；结束：`node scripts/app-cdp.mjs --kill`。
 - 详细流程、工具参数（`target` 传 ref）与断言方式见 `docs/testing-playwright.md`。
-- 断言 = 无障碍快照/截图 + SQLite 查询（数据目录 `.e2e-playwright/lighttodo.db`），不能只看接口状态码。
+- 断言 = 无障碍快照/截图 + SQLite 查询（数据目录 `.tmp/e2e/playwright/lighttodo.db`），不能只看接口状态码。
 - 旧脚本 `scripts/e2e*.mjs` 保留为回归兜底，新用例优先用 Playwright MCP。
+- **临时文件统一放 `.tmp/`**：`.tmp/data`（开发数据）、`.tmp/qa`（单元/QA）、`.tmp/e2e`（E2E）、`.tmp/perf`（基准）、`.tmp/shots`（截图）、`.tmp/logs`（日志）、`.tmp/cache`（缓存）、`.tmp/archive`（旧目录归档）。不要再往仓库根目录创建点开头临时目录。
 
 ## 构建 / 校验
 

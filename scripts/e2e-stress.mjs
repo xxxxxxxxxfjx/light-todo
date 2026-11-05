@@ -18,7 +18,7 @@ import {
 
 const ROOT = process.cwd()
 const EXE = join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe')
-const DIR = join(ROOT, '.e2e-stress')
+const DIR = join(ROOT, '.tmp', 'e2e', 'stress')
 
 rmSync(DIR, { recursive: true, force: true })
 mkdirSync(DIR, { recursive: true })

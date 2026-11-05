@@ -29,7 +29,7 @@
 - TypeScript 两套配置检查及 electron-vite 生产构建通过。
 - 现有 NLP、DB、导入、重复规则、QA 回归和 store 逻辑检查通过（使用本地 Node 直接执行 package.json 中对应命令；当前 pnpm 会尝试重装依赖，未改动依赖）。
 - 官方 Playwright MCP 经 CDP 连接真实 Electron，执行快照、点击、选择项和截图；未向应用注入测试 JS。
-- 之前验证了任务完成同步和设置落库。0.2.11 额外验证默认只有宠物、移入展开、移开收起、80 条任务滚轮滚动及拖动后位置落库；渲染器无 console error。截图见 `.shots/playwright/pet-idle-0211.png` 和 `pet-hover-0211.png`。
-- 截图与 MCP 记录位于 `.shots/playwright/`。仍需在真实多显示器、高 DPI 和全屏游戏环境下人工验收置顶、鼠标穿透和拖动边界。
+- 之前验证了任务完成同步和设置落库。0.2.11 额外验证默认只有宠物、移入展开、移开收起、80 条任务滚轮滚动及拖动后位置落库；渲染器无 console error。截图见 `.tmp/shots/playwright/pet-idle-0211.png` 和 `pet-hover-0211.png`。
+- 截图与 MCP 记录位于 `.tmp/shots/playwright/`。仍需在真实多显示器、高 DPI 和全屏游戏环境下人工验收置顶、鼠标穿透和拖动边界。
 
 本轮范围不含皮肤包导入、多只宠物及全屏自动隐藏；可通过桌宠菜单或托盘手动隐藏。

@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { rmSync } from 'node:fs'
+import { join } from 'node:path'
 import { initDb, createTask, updateTask, listTasks, setTaskStatus, searchTasks, getSidebar, createList, deleteTask, restoreTask, getTask } from '../src/main/db.ts'
 import { format, addDays } from 'date-fns'
 
-const dir = 'E:\\code\\todo\\.qa-db'
+const dir = join(process.cwd(), '.tmp', 'qa', 'db')
 rmSync(dir, { recursive: true, force: true })
 initDb(dir)
 

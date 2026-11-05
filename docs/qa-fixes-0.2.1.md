@@ -12,7 +12,7 @@
 - 原有状态回归通过。
 - 新增 e2e-layout-theme：七天时间轴、全天/定时分区、重叠任务、双击时段新增；1440×900、1100×700、860×640、720×520四档窗口测试；侧栏和详情抽屉；模拟nativeTheme深浅色更新并检查原生overlay实际应用颜色与页面一致；重启保留主题及周视图。
 - 系统主题测试通过Electron的nativeTheme事件模拟，不修改Windows个人设置。
-- 截图在 .shots/week-0.2.1.png、.shots/week-small-0.2.1.png、.shots/week-dark-0.2.1.png。
+- 截图在 .tmp/shots/week-0.2.1.png、.tmp/shots/week-small-0.2.1.png、.tmp/shots/week-dark-0.2.1.png。
 
 打包：release/0.2.1/LightTodo-0.2.1-x64.exe；ZIP：release/0.2.1/LightTodo-0.2.1-portable.zip。
 

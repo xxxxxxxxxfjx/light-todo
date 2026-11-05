@@ -10,7 +10,7 @@ import { DatabaseSync } from 'node:sqlite'
 
 const ROOT = process.cwd()
 const EXE = join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe')
-const E2E_DIR = join(ROOT, '.e2e')
+const E2E_DIR = join(ROOT, '.tmp', 'e2e', 'main')
 const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
 
 const only = process.argv[2]

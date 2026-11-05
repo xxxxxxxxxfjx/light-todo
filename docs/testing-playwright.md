@@ -20,13 +20,13 @@ Electron 实例配置在 `~/.dsh/profiles/web/cordis.patch.yml`，同源同上�
 # 1. 先关掉用户自己打开的 LightTodo（应用有单实例锁）
 node scripts/app-cdp.mjs --kill
 
-# 2. 启动带调试端口的应用（数据落在 .e2e-playwright/，--fresh 先清空）
+# 2. 启动带调试端口的应用（数据落在 .tmp/e2e/playwright/，--fresh 先清空）
 node scripts/app-cdp.mjs --fresh
 #   → 打印 pid / CDP 地址 / 窗口标题 / 数据目录
 ```
 
 3. 用 `mcp__playwright_app__browser_snapshot` 读无障碍树，拿到 `[ref=eN]`，再 `browser_click` / `browser_type`。
-4. `browser_take_screenshot` 存图（输出目录 `.shots/playwright/`）。
+4. `browser_take_screenshot` 存图（输出目录 `.tmp/shots/playwright/`）。
 5. 收尾：`node scripts/app-cdp.mjs --kill`。
 
 ### 常用动作对照
@@ -46,11 +46,11 @@ node scripts/app-cdp.mjs --fresh
 ## 断言
 
 - **UI 断言**：以 `browser_snapshot` 文本 / 截图为证据（不要只看 HTTP 状态码）。
-- **数据断言**：直接读 SQLite（数据目录即 `.e2e-playwright/`）：
+- **数据断言**：直接读 SQLite（数据目录即 `.tmp/e2e/playwright/`）：
 
 ```js
 import { DatabaseSync } from 'node:sqlite'
-const db = new DatabaseSync('.e2e-playwright/lighttodo.db')
+const db = new DatabaseSync('.tmp/e2e/playwright/lighttodo.db')
 const rows = db.prepare('SELECT title FROM tasks').all()
 ```
 

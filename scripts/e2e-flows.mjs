@@ -10,7 +10,7 @@ import { DatabaseSync } from 'node:sqlite'
 
 const ROOT = process.cwd()
 const EXE = join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe')
-const BASE = join(ROOT, '.e2e-flows')
+const BASE = join(ROOT, '.tmp', 'e2e', 'flows')
 const only = process.argv[2]
 
 let failed = 0

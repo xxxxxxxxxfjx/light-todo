@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import * as db from '../src/main/db.ts'
 import { importFromText } from '../src/main/import.ts'
 import { format } from 'date-fns'
-const dir=mkdtempSync(join(process.cwd(),'.qa-regressions-'))
+mkdirSync(join(process.cwd(),'.tmp','qa'),{recursive:true})
+const dir=mkdtempSync(join(process.cwd(),'.tmp','qa','regressions-'))
 db.initDb(dir)
 try {
  const list=db.createList({name:'回归清单'})

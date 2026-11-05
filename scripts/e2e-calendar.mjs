@@ -2,8 +2,9 @@ import {spawn} from 'node:child_process'
 import {mkdtempSync,writeFileSync,readFileSync,existsSync,mkdirSync} from 'node:fs'
 import {join,resolve} from 'node:path'
 import assert from 'node:assert/strict'
-const dir=mkdtempSync(join(process.cwd(),'.qa-calendar-release-'))
-mkdirSync('.shots',{recursive:true})
+mkdirSync(join(process.cwd(),'.tmp','e2e'),{recursive:true})
+const dir=mkdtempSync(join(process.cwd(),'.tmp','e2e','calendar-release-'))
+mkdirSync(join(process.cwd(),'.tmp','shots'),{recursive:true})
 const packaged=process.argv[2]
 const exe=packaged ? resolve(packaged) : resolve('node_modules/electron/dist/electron.exe')
 const spec=join(dir,'calendar.json')
@@ -20,7 +21,7 @@ const steps=[
  {js:`!!document.querySelector('.qa')`},
  {js:`document.querySelector('.qa-submit').click()`,wait:500},
  {js:`({title:document.querySelector('.agenda-list').textContent,chip:!!document.querySelector('[data-date="${date}"] .cal-item')})`},
- {shot:resolve('.shots/calendar-0.2.0.png')},
+ {shot:resolve('.tmp/shots/calendar-0.2.0.png')},
  {js:`document.querySelector('.agenda-task').click()`,wait:300},
  {js:`({title:document.querySelector('.detail-title')?.value,width:document.querySelector('.cal-cell')?.getBoundingClientRect().width})`},
  {js:`document.querySelector('.detail-head button').click()`,wait:200},

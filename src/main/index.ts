@@ -32,7 +32,7 @@ const portableRoot = process.env.PORTABLE_EXECUTABLE_DIR
 const dataRootOverride =
   process.env.LIGHTTODO_DATA_DIR ??
   portableRoot ??
-  (isDev ? join(app.getAppPath(), '.data') : null)
+  (isDev ? join(app.getAppPath(), '.tmp', 'data') : null)
 if (dataRootOverride) {
   mkdirSync(join(dataRootOverride, 'userdata'), { recursive: true })
   app.setPath('userData', join(dataRootOverride, 'userdata'))
@@ -76,7 +76,7 @@ nativeTheme.on('updated', syncWindowTheme)
 function resolveDataDir(): string {
   if (process.env.LIGHTTODO_DATA_DIR) return process.env.LIGHTTODO_DATA_DIR
   if (portableRoot) return portableRoot
-  if (!app.isPackaged) return join(app.getAppPath(), '.data')
+  if (!app.isPackaged) return join(app.getAppPath(), '.tmp', 'data')
   return app.getPath('userData')
 }
 

@@ -3,7 +3,7 @@ import ts from 'typescript'
 const transpile=s=>ts.transpileModule(s,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText
 const asUrl=s=>'data:text/javascript;base64,'+Buffer.from(s).toString('base64')
 import {mkdirSync,readFileSync} from 'node:fs'
-mkdirSync('.qa-review',{recursive:true})
+mkdirSync('.tmp/qa/review',{recursive:true})
 const filterUrl=asUrl(transpile(readFileSync('src/renderer/src/lib/task-filter.ts','utf8')).replace("from 'date-fns'", "from '"+import.meta.resolve('date-fns')+"'"))
 const storeUrl=asUrl(transpile(readFileSync('src/renderer/src/store.ts','utf8')).replace("from 'zustand'", "from '"+import.meta.resolve('zustand')+"'").replace("from './lib/task-filter'", "from '"+filterUrl+"'"))
 const pending=[]

@@ -1,9 +1,10 @@
 import {spawn} from 'node:child_process'
-import {mkdtempSync,copyFileSync,existsSync,readFileSync,writeFileSync} from 'node:fs'
+import {mkdtempSync,mkdirSync,copyFileSync,existsSync,readFileSync,writeFileSync} from 'node:fs'
 import {resolve,join} from 'node:path'
 import {DatabaseSync} from 'node:sqlite'
 import assert from 'node:assert/strict'
-const dir=mkdtempSync(join(process.cwd(),'.qa-default-launch-'))
+mkdirSync(join(process.cwd(),'.tmp','e2e'),{recursive:true})
+const dir=mkdtempSync(join(process.cwd(),'.tmp','e2e','default-launch-'))
 const exe=join(dir,'LightTodo.exe');copyFileSync(resolve(process.argv[2]),exe)
 const shot=join(dir,'calendar.png')
 const env={...process.env};for(const key of Object.keys(env))if(/^(LIGHTTODO_DATA_DIR|PORTABLE_EXECUTABLE_DIR|PORTABLE_EXECUTABLE_FILE|ELECTRON_RUN_AS_NODE|NODE_OPTIONS)$/i.test(key))delete env[key]

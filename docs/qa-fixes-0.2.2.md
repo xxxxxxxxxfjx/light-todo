@@ -14,4 +14,4 @@
 
 当前会话无Playwright MCP工具；UI使用AGENTS.md允许保留的旧回归流程兜底，新增启动器回归不向页面注入操作脚本。
 
-成品验证结果：默认无数据目录变量启动通过，截图/SQLite/便携日志均已验证（.qa-default-launch-xA8LHX）；最终0.2.2的周视图、四档窗口尺寸、主题同步和重启持久化回归通过（.qa-layout-theme-io9YR8）。滚动条截图：.shots/calendar-scrollbars-0.2.2.png。
+成品验证结果：默认无数据目录变量启动通过，截图/SQLite/便携日志均已验证（.qa-default-launch-xA8LHX）；最终0.2.2的周视图、四档窗口尺寸、主题同步和重启持久化回归通过（.qa-layout-theme-io9YR8）。滚动条截图：.tmp/shots/calendar-scrollbars-0.2.2.png。

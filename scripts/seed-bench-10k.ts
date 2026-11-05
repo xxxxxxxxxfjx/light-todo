@@ -4,7 +4,7 @@
  *
  * Usage (from the repository root):
  *   node --experimental-strip-types scripts/seed-bench-10k.ts
- *   node --experimental-strip-types scripts/seed-bench-10k.ts --dir .perf-bench --count 10000
+ *   node --experimental-strip-types scripts/seed-bench-10k.ts --dir .tmp/perf/bench --count 10000
  *
  * The target directory must be inside this repository. It is deleted and
  * recreated on every run. The schema comes from src/main/db.ts (initDb), then
@@ -35,7 +35,7 @@ function argValue(name: string, fallback: string): string {
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
   console.log(`Usage: node --experimental-strip-types scripts/seed-bench-10k.ts [options]
 
-  --dir <path>    data directory inside the repository (default: .perf-bench)
+  --dir <path>    data directory inside the repository (default: .tmp/perf/bench)
   --count <n>     total number of tasks (default: 10000, minimum: 10)
   --help          show this help`)
   process.exit(0)
@@ -47,7 +47,7 @@ if (!Number.isInteger(count) || count < 10 || count > 500000) {
   fail(`--count must be an integer between 10 and 500000 (received ${countRaw})`)
 }
 
-const dir = resolve(ROOT, argValue('dir', '.perf-bench'))
+const dir = resolve(ROOT, argValue('dir', '.tmp/perf/bench'))
 const rel = relative(ROOT, dir)
 if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
   fail('--dir must be a non-root directory inside the repository workspace')

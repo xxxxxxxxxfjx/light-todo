@@ -68,13 +68,31 @@ pnpm typecheck    # 类型检查
 
 > 打包约定：每次完成代码/界面/文档改动后都要执行 `pnpm dist`，不能只交源码；版本号在 `package.json` 中递增，产物在 `release/<version>/`。
 
-当前产物：`release/0.3.0/LightTodo-0.3.0-x64.exe`（直接双击）与
-`release/0.3.0/LightTodo-0.3.0-portable.zip`（完整解压后双击 `LightTodo.exe`）。
-单文件版首次会在同目录释放 `LightTodoApp-0.3.0-<构建标识>`，日常数据保存到同目录 `LightTodoData`。
+当前产物：`release/0.3.1/LightTodo-0.3.1-x64.exe`（直接双击）与
+`release/0.3.1/LightTodo-0.3.1-portable.zip`（完整解压后双击 `LightTodo.exe`）。
+单文件版首次会在同目录释放 `LightTodoApp-0.3.1-<构建标识>`，日常数据保存到同目录 `LightTodoData`。
 启动器先按正常模式运行，并把运行时退出码记录到 `LightTodoData/launcher.log`；受限环境如出现 Chromium 初始化退出码 `0x80000003`，需从命令行加 `--no-sandbox --disable-gpu` 启动。
 构建使用本地 Electron 分发目录及 Windows 自带 .NET Framework C# 编译器。
 
-开发数据默认放在项目下 `.data/`，安装版放在 `%APPDATA%/LightTodo/`，便携版放在 exe 同目录 `LightTodoData/`。
+开发数据默认放在项目下 `.tmp/data/`，安装版放在 `%APPDATA%/LightTodo/`，便携版放在 exe 同目录 `LightTodoData/`。
+
+## 临时文件
+
+仓库根目录只保留 `.git/` 与 `.tmp/` 两个点开头目录；所有测试、构建、QA 和截图产物统一放在 `.tmp/`：
+
+| 目录 | 用途 |
+| --- | --- |
+| `.tmp/data` | 开发模式运行数据 |
+| `.tmp/qa` | 单元/QA 回归临时数据库 |
+| `.tmp/e2e` | Electron E2E 与 CDP 测试数据 |
+| `.tmp/perf` | 性能基准数据与报告 |
+| `.tmp/shots` | 截图 |
+| `.tmp/logs` | 历史日志 |
+| `.tmp/cache` | npm/pnpm 缓存 |
+| `.tmp/archive` | 旧临时目录归档 |
+| `.tmp/scratch` | 临时脚本草稿 |
+
+测试脚本会自动创建对应子目录；不要再往仓库根目录新建 `.qa-*` / `.e2e-*` / `.perf-*` 等目录。
 
 ## 测试脚本
 
@@ -173,3 +191,10 @@ node scripts/e2e-layout-theme.mjs release/0.2.9/LightTodo-0.2.9-x64.exe
 - 备注列表回填修复，避免打开详情后误清空备注。
 - 新增 `scripts/seed-bench-10k.ts`、`scripts/bench-perf.ts`、`scripts/e2e-virtual.mjs` 与性能基线文档。
 - 回归：pnpm typecheck、pnpm test:unit 全部通过；Electron E2E/冷启动/内存/FPS 因本会话 Chromium IPC 限制未测，需干净 Win11 复跑。
+
+## 0.3.1
+
+临时目录整理：仓库根目录只保留 `.git/` 与 `.tmp/`，所有测试/QA/E2E/性能/截图/缓存统一放到 `.tmp/` 下；脚本路径已同步。详见 `docs/release-0.3.1.md`。
+
+- `.tmp/data` 开发数据、`.tmp/qa` 单元/QA、`.tmp/e2e` E2E、`.tmp/perf` 基准、`.tmp/shots` 截图、`.tmp/logs` 日志、`.tmp/cache` 缓存、`.tmp/archive` 旧目录归档。
+- `scripts/app-cdp.mjs`、`e2e*.mjs`、`test-*.ts`、`bench-perf.ts` 等已改为写入 `.tmp/`，后续测试不会再污染根目录。

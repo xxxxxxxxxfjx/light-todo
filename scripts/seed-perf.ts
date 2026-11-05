@@ -1,8 +1,9 @@
 import { rmSync } from 'node:fs'
+import { join } from 'node:path'
 import { initDb, createTask } from '../src/main/db.ts'
 import { format, addDays } from 'date-fns'
 
-const dir = 'E:\\code\\todo\\.qa-perf'
+const dir = join(process.cwd(), '.tmp', 'qa', 'perf')
 rmSync(dir, { recursive: true, force: true })
 initDb(dir)
 

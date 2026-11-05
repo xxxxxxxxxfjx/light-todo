@@ -2,7 +2,7 @@ const { DatabaseSync } = require('node:sqlite')
 const { randomUUID } = require('node:crypto')
 const fs = require('node:fs')
 
-const dir = 'E:/code/todo/.qa-perf'
+const dir = require('node:path').join(process.cwd(), '.tmp', 'qa', 'perf')
 fs.rmSync(dir, { recursive: true, force: true })
 fs.mkdirSync(dir, { recursive: true })
 

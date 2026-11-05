@@ -1,4 +1,5 @@
 import { rmSync } from 'node:fs'
+import { join } from 'node:path'
 import { initDb, getLists, searchTasks, getTask } from '../src/main/db.ts'
 import { importFromText } from '../src/main/import.ts'
 
@@ -11,7 +12,7 @@ function check(name: string, cond: boolean, detail?: unknown): void {
   }
 }
 
-const dir = 'E:\\code\\todo\\.qa-import'
+const dir = join(process.cwd(), '.tmp', 'qa', 'import')
 rmSync(dir, { recursive: true, force: true })
 initDb(dir)
 

@@ -1,5 +1,6 @@
 const fs=require('node:fs'),path=require('node:path'),{execFileSync,spawn}=require('node:child_process'),assert=require('node:assert/strict');
-const base=fs.mkdtempSync(path.join(process.cwd(),'.qa-launcher-'));
+fs.mkdirSync(path.join(process.cwd(),'.tmp','e2e'),{recursive:true});
+const base=fs.mkdtempSync(path.join(process.cwd(),'.tmp','e2e','launcher-'));
 const csc=path.join(process.env.WINDIR||'C:/Windows','Microsoft.NET/Framework64/v4.0.30319/csc.exe');
 const launcher=path.join(base,'Launcher.cs');fs.writeFileSync(launcher,fs.readFileSync('scripts/LightTodoLauncher.cs','utf8').replaceAll('__LIGHTTODO_VERSION__','test'));
 const stub=path.join(base,'Runtime.cs');fs.writeFileSync(stub,`using System;using System.IO;using System.Diagnostics;using System.Threading;class Stub {

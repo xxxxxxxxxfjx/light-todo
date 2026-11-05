@@ -1,6 +1,7 @@
+import { join } from 'node:path'
 import { initDb, getSidebar, listTasks } from '../src/main/db.ts'
 
-const dir = 'E:/code/todo/.qa-perf'
+const dir = join(process.cwd(), '.tmp', 'qa', 'perf')
 initDb(dir)
 
 function t(name: string, fn: () => unknown): void {

@@ -15,7 +15,7 @@ import { DatabaseSync } from 'node:sqlite'
 
 const ROOT = process.cwd()
 const EXE = join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe')
-const DIR = join(ROOT, '.e2e-virtual')
+const DIR = join(ROOT, '.tmp', 'e2e', 'virtual')
 const TASKS = 600
 
 function assert(cond, msg) {
