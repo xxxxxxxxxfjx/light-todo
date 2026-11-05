@@ -2093,3 +2093,26 @@ body.calendar-resizing, body.calendar-resizing * { cursor:row-resize !important;
   .main-title h1 { font-size:20px; }
   .filter-bar { gap:4px; }
 }
+
+/* ── TaskList virtual scrolling (>150 visible tasks) ──────
+   These rules only apply to the virtual branch. Lists at or below the
+   threshold keep the original .task-section / .rows / .task-row DOM. */
+.task-virtual {
+  position: relative;
+  margin: 0 18px; /* matches .task-section horizontal padding */
+}
+.task-virtual-item {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+.task-virtual-task {
+  padding-bottom: 6px; /* matches the .rows gap */
+}
+.task-virtual-section {
+  padding: 12px 0 8px; /* matches .section-head vertical margins */
+}
+.task-virtual-section .section-head {
+  margin: 0;
+}

@@ -31,6 +31,7 @@ export function QuickAdd(): React.JSX.Element {
     view,
     quickAddInitial,
     quickAddDate,
+    quickAddInbox,
     setFilter
   } = useStore()
   const [saving, setSaving] = useState(false)
@@ -54,8 +55,14 @@ export function QuickAdd(): React.JSX.Element {
     }
     return { scheduledDate: quickAddDate, dueAt }
   }, [parsed, quickAddDate])
+  // 全局捕获带 inbox 标记；在收件箱视图内新建同样不补默认日期。
+  const inboxMode = quickAddInbox || view.type === 'inbox'
   const previewSomeday =
-    view.type === 'someday' && !effective.scheduledDate && !effective.dueAt && !quickAddDate
+    !inboxMode &&
+    view.type === 'someday' &&
+    !effective.scheduledDate &&
+    !effective.dueAt &&
+    !quickAddDate
 
   useEffect(() => {
     ref.current?.focus()
@@ -96,28 +103,34 @@ export function QuickAdd(): React.JSX.Element {
         listId = created.id
         await refreshSidebar()
       }
-    } else if (view.type === 'list' && view.listId) {
+    } else if (!inboxMode && view.type === 'list' && view.listId) {
       listId = view.listId
     }
 
-    // 标签归属：当前标签视图下新增时，自动带上该标签
+    // 标签归属：当前标签视图下新增时，自动带上该标签；全局捕获不继承视图上下文。
     const tagNames = [...parsed.tagNames]
-    if (view.type === 'tag' && view.tagId) {
+    if (!inboxMode && view.type === 'tag' && view.tagId) {
       const currentTag = sidebar.tags.find((t) => t.id === view.tagId)
       if (currentTag && !tagNames.includes(currentTag.name)) tagNames.push(currentTag.name)
     }
 
-    // 日期默认：日历点选的那天 > NLP 解析 > 当前视图约定
+    // 日期默认：日历点选的那天 > NLP 解析 > 当前视图约定。
+    // 收件箱 / 全局捕获 / 清单视图都不强行补今天日期。
     let scheduledDate = effective.scheduledDate
     const dueAt = effective.dueAt
-    if (!scheduledDate && !dueAt && view.type !== 'someday') {
+    if (
+      !scheduledDate &&
+      !dueAt &&
+      !inboxMode &&
+      view.type !== 'someday' &&
+      view.type !== 'list'
+    ) {
       scheduledDate =
         view.type === 'upcoming'
           ? format(addDays(new Date(), 1), 'yyyy-MM-dd')
           : format(new Date(), 'yyyy-MM-dd')
     }
-    const isSomeday =
-      view.type === 'someday' && !scheduledDate && !dueAt
+    const isSomeday = !inboxMode && view.type === 'someday' && !scheduledDate && !dueAt
 
     await createTask({
       title,
@@ -135,11 +148,13 @@ export function QuickAdd(): React.JSX.Element {
     showToast(
       isSomeday
         ? '已加入也许'
-        : parsed.listName || view.type === 'list'
+        : parsed.listName || (!inboxMode && view.type === 'list')
           ? `已添加到${parsed.listName ?? view.title}`
           : scheduledDate
             ? `已添加到${dateLabel(scheduledDate)}`
-            : '已添加'
+            : inboxMode
+              ? '已添加到收件箱'
+              : '已添加'
     )
     if (keepOpen) {
       setText('')
@@ -162,9 +177,11 @@ export function QuickAdd(): React.JSX.Element {
             rows={1}
             value={text}
             placeholder={
-              view.type === 'someday'
-                ? '写下一个以后可能做的想法…'
-                : '明天下午 3 点 交周报 #工作 @汇报 !高'
+              inboxMode
+                ? '记下一条想法，之后在收件箱里整理…'
+                : view.type === 'someday'
+                  ? '写下一个以后可能做的想法…'
+                  : '明天下午 3 点 交周报 #工作 @汇报 !高'
             }
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {

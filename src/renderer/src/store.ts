@@ -13,6 +13,24 @@ export interface ViewState {
 
 const EMPTY_SIDEBAR: SidebarData = { folders: [], lists: [], tags: [], counts: {} }
 
+// Keep the first paint small: a local SQLite query is cheap, but shipping
+// thousands of task objects through IPC and holding them in React state is not.
+// Virtual scrolling makes large lists usable; these limits keep the common
+// views light while "加载更多" still exposes the full history.
+const INITIAL_LIMITS: Record<ViewKey, number> = {
+  inbox: 500,
+  today: 500,
+  upcoming: 500,
+  all: 500,
+  someday: 300,
+  completed: 200,
+  trash: 200,
+  calendar: -1,
+  list: 500,
+  tag: 500
+}
+const PAGE_SIZE = 500
+
 interface AppStore {
   view: ViewState
   tasks: Task[]
@@ -31,6 +49,8 @@ interface AppStore {
   quickAddOpen: boolean
   quickAddInitial: string
   quickAddDate: string | null
+  /** 全局捕获（托盘 / 全局快捷键 / lighttodo://add）标记：默认进收件箱。 */
+  quickAddInbox: boolean
   selectMode: boolean
   selectedIds: string[]
   batchBusy: boolean
@@ -57,7 +77,7 @@ interface AppStore {
   batchDelete: () => Promise<void>
   batchRestore: () => Promise<void>
   batchPurge: () => Promise<void>
-  openQuickAdd: (text?: string, date?: string) => void
+  openQuickAdd: (text?: string, date?: string, inbox?: boolean) => void
   closeQuickAdd: () => void
   openSearch: () => void
   closeSearch: () => void
@@ -69,6 +89,9 @@ interface AppStore {
 let toastTimer: ReturnType<typeof setTimeout> | null = null
 let refreshId = 0
 let selectionId = 0
+// Highest row count this view has attempted to load. refresh() must not shrink
+// back to the initial page while a loadMore request is still in flight.
+let requestedLimit = 0
 
 export const useStore = create<AppStore>((set, get) => ({
   view: { type: 'today', title: '今天' },
@@ -92,6 +115,7 @@ export const useStore = create<AppStore>((set, get) => ({
   quickAddOpen: false,
   quickAddInitial: '',
   quickAddDate: null,
+  quickAddInbox: false,
   selectMode: false,
   selectedIds: [],
   batchBusy: false,
@@ -106,6 +130,7 @@ export const useStore = create<AppStore>((set, get) => ({
     const title =
       opts?.title ??
       ({
+        inbox: '收件箱',
         today: '今天',
         upcoming: '最近 7 天',
         all: '全部',
@@ -117,6 +142,7 @@ export const useStore = create<AppStore>((set, get) => ({
         tag: '标签'
       } as Record<ViewKey, string>)[type]
     selectionId++
+    requestedLimit = 0
     set({ view: { type, ...opts, title }, tasks: [], selected: null, filter: 'all', selectedIds: [], selectMode: false, batchBusy: false, sidebarOpen: false })
     await get().refresh()
   },
@@ -130,7 +156,10 @@ export const useStore = create<AppStore>((set, get) => ({
       set({ loading: true, error: '' })
       return
     }
-    const limit = view.type === 'calendar' ? -1 : Math.max(get().tasks.length, 1000)
+    const limit =
+      view.type === 'calendar'
+        ? -1
+        : Math.max(get().tasks.length, INITIAL_LIMITS[view.type] ?? 500, requestedLimit)
     set({ loading: true, error: '' })
     try {
       const tasks = await window.api.tasks.list({
@@ -151,10 +180,16 @@ export const useStore = create<AppStore>((set, get) => ({
     if (get().loading) return
     const { view, tasks } = get()
     const request = ++refreshId
+    // Reserve the page before awaiting so a concurrent refresh cannot shrink
+    // the list back to the initial limit and discard this page.
+    requestedLimit = Math.max(requestedLimit, tasks.length + PAGE_SIZE)
     set({ loading: true, error: '' })
     try {
-      const more = await window.api.tasks.list({ view: view.type, listId: view.listId, tagId: view.tagId, limit: 1000, offset: tasks.length })
-      if (request === refreshId) set({ tasks: [...tasks, ...more], loading: false, hasMore: more.length === 1000 })
+      const more = await window.api.tasks.list({ view: view.type, listId: view.listId, tagId: view.tagId, limit: PAGE_SIZE, offset: tasks.length })
+      if (request === refreshId) {
+        requestedLimit = Math.max(requestedLimit, tasks.length + more.length)
+        set({ tasks: [...tasks, ...more], loading: false, hasMore: more.length === PAGE_SIZE })
+      }
     } catch {
       if (request === refreshId) set({ loading: false, error: '更多任务加载失败，请重试' })
     }
@@ -301,15 +336,22 @@ export const useStore = create<AppStore>((set, get) => ({
     }
   },
 
-  openQuickAdd: (text = '', date) =>
+  openQuickAdd: (text = '', date, inbox = false) =>
     set({
       quickAddOpen: true,
       quickAddInitial: text,
       quickAddDate: date ?? null,
+      quickAddInbox: inbox,
       searchOpen: false,
       settingsOpen: false
     }),
-  closeQuickAdd: () => set({ quickAddOpen: false, quickAddInitial: '', quickAddDate: null }),
+  closeQuickAdd: () =>
+    set({
+      quickAddOpen: false,
+      quickAddInitial: '',
+      quickAddDate: null,
+      quickAddInbox: false
+    }),
   openSearch: () => set({ searchOpen: true, quickAddOpen: false, settingsOpen: false }),
   closeSearch: () => set({ searchOpen: false }),
   openSettings: () => set({ settingsOpen: true, quickAddOpen: false, searchOpen: false }),

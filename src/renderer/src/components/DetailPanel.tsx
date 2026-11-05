@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CalendarDays, Check, Flag, ListTodo, Moon, Plus, Repeat, Trash2, X } from 'lucide-react'
 import { useStore } from '../store'
 import { humanDate, isoToLocalInput, localInputToIso, todayStr } from '../lib/format'
@@ -333,18 +333,11 @@ export function DetailPanel(): React.JSX.Element {
 }
 
 function Overview(): React.JSX.Element {
-  const { tasks, sidebar } = useStore()
-  const [todayTasks, setTodayTasks] = useState<Task[]>([])
-
-  useEffect(() => {
-    window.api.tasks.list({ view: 'today' }).then(setTodayTasks)
-  }, [tasks])
-
-  const stats = useMemo(() => {
-    const high = todayTasks.filter((t) => t.priority === 3).length
-    const dated = todayTasks.filter((t) => t.scheduledDate || t.dueAt).length
-    return { high, dated }
-  }, [todayTasks])
+  const { sidebar } = useStore()
+  // The sidebar already counts today's tasks in SQLite. Re-querying the whole
+  // today list here duplicated the main list IPC on every task change.
+  const todayCount = sidebar.counts.today ?? 0
+  const high = sidebar.counts.todayHigh ?? 0
 
   return (
     <aside className="detail overview">
@@ -354,12 +347,12 @@ function Overview(): React.JSX.Element {
       <div className="overview-body">
         <div className="ov-date">{humanDate()}</div>
         <div className="ov-big">
-          {todayTasks.length || sidebar.counts.today || 0}
+          {todayCount}
           <span>项待办</span>
         </div>
         <div className="ov-row">
           <div className="ov-card">
-            <em>{stats.high}</em>
+            <em>{high}</em>
             <span>高优先级</span>
           </div>
           <div className="ov-card">

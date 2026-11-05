@@ -52,3 +52,19 @@ await useStore.getState().selectTask(null)
 resolveDetail({id:'instant',title:'迟到详情'});await selection
 assert.equal(useStore.getState().selected,null)
 console.log('PASS 详情即时显示，关闭后迟到响应不得重新弹出')
+
+// Loading more must not be undone by a concurrent refresh (P0 regression):
+// the refresh must keep the reserved 500-row page even if loadMore resolves later.
+pending.length = 0
+const initial = Array.from({ length: 500 }, (_, i) => ({ id: `seed-${i}` }))
+useStore.setState({ view: { type: 'all', title: '全部' }, tasks: initial, loading: false })
+const morePromise = useStore.getState().loadMore()
+const refreshPromise = useStore.getState().refresh()
+const refreshed = Array.from({ length: 1000 }, (_, i) => ({ id: `full-${i}` }))
+pending[1](refreshed)
+await refreshPromise
+pending[0](Array.from({ length: 500 }, (_, i) => ({ id: `more-${i}` })))
+await morePromise
+assert.equal(useStore.getState().tasks.length, 1000)
+assert.equal(useStore.getState().tasks[0].id, 'full-0')
+console.log('PASS 加载更多与并发刷新不会回退列表')

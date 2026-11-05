@@ -18,7 +18,7 @@ import { initDb, closeDb, getDueReminders, getSetting, setSetting, markReminderS
 import { windowColors, type ThemePreference } from './window-theme'
 import { registerIpc } from './ipc'
 import { backupNow, registerDataIpc } from './data'
-import { registerPet, stopPet, togglePet } from './pet'
+import { registerPet, schedulePetCreation, stopPet, togglePet } from './pet'
 
 const T0 = Date.now()
 const isDev = !app.isPackaged
@@ -150,8 +150,20 @@ function createWindow(): void {
   })
 
   mainWindow.once('ready-to-show', () => {
+    const coldStartMs = Date.now() - T0
     log('Window ready')
-    console.log('COLD_START_MS', Date.now() - T0)
+    log(`COLD_START_MS ${coldStartMs}`)
+    console.log('COLD_START_MS', coldStartMs)
+    // 主窗口可用后再安排桌宠，默认关闭时这里直接跳过；老用户约 8 秒后创建。
+    schedulePetCreation()
+    // 回收站 30 天清理放到首屏之后，避免挡住冷启动路径。
+    setTimeout(() => {
+      try {
+        purgeTrash()
+      } catch (error) {
+        log(`purgeTrash failed: ${String(error)}`)
+      }
+    }, 1500)
     const hiddenStart = process.argv.includes('--hidden') && !e2eArg && !shotPath
     if (!hiddenStart) mainWindow?.show()
     if (process.argv.includes('--quick-add')) {
@@ -430,8 +442,8 @@ function setupIntegration(): void {
 if (ownsInstance) app.whenReady().then(() => {
   app.setAppUserModelId('com.lighttodo.app')
   initDb(resolveDataDir())
-  // Trash keeps items for 30 days; clean up old entries on every startup.
-  purgeTrash()
+  // Trash cleanup is not needed before the first paint; defer it so the
+  // window can become visible without waiting for two extra writes.
   const savedTheme = getSetting('ui_theme')
   nativeTheme.themeSource = savedTheme === 'light' || savedTheme === 'dark' ? savedTheme : 'system'
   ipcMain.handle('app:setTheme', (_event, theme: ThemePreference) => {
@@ -447,7 +459,7 @@ if (ownsInstance) app.whenReady().then(() => {
     showMain()
     if (id) sendToRendererWhenReady('ui:open-task', id)
     if (settings) sendToRendererWhenReady('ui:settings')
-  })
+  }, T0)
   createTray()
   registerShortcuts()
   setupIntegration()

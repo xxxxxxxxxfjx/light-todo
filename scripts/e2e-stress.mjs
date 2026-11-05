@@ -80,7 +80,11 @@ const steps = [
       [...document.querySelectorAll('.nav-item')].find((e) => e.textContent.trim().startsWith('全部'))?.click();
       const iv = setInterval(() => {
         const n = document.querySelectorAll('.task-row').length;
-        if (n > 0) { clearInterval(iv); resolve({ ms: Math.round(performance.now() - t0), rows: n }); }
+        const s = document.querySelector('.task-scroll');
+        if (n > 0) {
+          clearInterval(iv);
+          resolve({ ms: Math.round(performance.now() - t0), rows: n, virtualized: s?.dataset.virtualized, total: Number(s?.dataset.totalRows ?? 0) });
+        }
       }, 20);
       setTimeout(() => { clearInterval(iv); resolve({ ms: -1, rows: 0 }); }, 8000);
     })`,
@@ -163,7 +167,7 @@ check('STRESS-03 查询 500 条 < 300ms', queryMs < 300, `${Math.round(queryMs)}
 check('STRESS-04 搜索 < 300ms', searchMs < 300, `${Math.round(searchMs)}ms`)
 check('STRESS-05 首屏渲染 < 10s（本机无 GPU）', firstRender.rows > 0, JSON.stringify(firstRender))
 check('STRESS-06 切换全部 < 3s', allView.ms > 0 && allView.ms < 3000, JSON.stringify(allView))
-check('STRESS-07 全部视图渲染 ≥ 400 行', allView.rows >= 400, JSON.stringify(allView))
+check('STRESS-07 全部视图虚拟化（DOM 行数 < 120）', allView.rows > 0 && allView.rows < 120 && allView.virtualized === 'true', JSON.stringify(allView))
 check('STRESS-08 搜索响应 < 3s', search.ms > 0 && search.ms < 3000, JSON.stringify(search))
 check('STRESS-09 日历渲染 < 3s', calendar.ms > 0 && calendar.ms < 3000, JSON.stringify(calendar))
 check('STRESS-10 启动总耗时 < 20s', bootMs < 20000, `${Math.round(bootMs)}ms`)

@@ -1,9 +1,10 @@
+import { memo } from 'react'
 import { Check, Clock, Moon, Repeat } from 'lucide-react'
 import { useStore } from '../store'
 import { dueLabel } from '../lib/format'
 import type { Task } from '@shared/types'
 
-export function TaskRow({ task }: { task: Task }): React.JSX.Element {
+export const TaskRow = memo(function TaskRow({ task }: { task: Task }): React.JSX.Element {
   const {
     selected,
     selectTask,
@@ -97,4 +98,4 @@ export function TaskRow({ task }: { task: Task }): React.JSX.Element {
       </div>
     </div>
   )
-}
+})

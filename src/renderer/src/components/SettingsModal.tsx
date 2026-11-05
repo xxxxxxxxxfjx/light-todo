@@ -30,6 +30,7 @@ const THEMES = [
 ]
 
 const VIEWS = [
+  { key: 'inbox', label: '收件箱' },
   { key: 'today', label: '今天' },
   { key: 'upcoming', label: '最近 7 天' },
   { key: 'all', label: '全部' },
@@ -160,17 +161,17 @@ export function SettingsModal(): React.JSX.Element {
           <section className="set-section pet-settings" hidden={section !== 'pet'}>
             <div className="pet-settings-preview">
               <Mascot skin={pet.skin}/>
-              <div><span className="pet-settings-kicker">YOUR LITTLE COMPANION</span><h2>让小可爱，陪你过好今天</h2><p>今日任务就在桌面右下角，轻轻一勾，完成一件。</p><span className="pet-settings-status">{pet.enabled ? '✦ 已开启 · 桌面置顶陪伴中' : '♡ 开启一份小小的陪伴'}</span></div>
+              <div><span className="pet-settings-kicker">YOUR LITTLE COMPANION</span><h2>让小可爱，陪你过好今天</h2><p>今日任务就在桌面右下角，轻轻一勾，完成一件。</p><span className="pet-settings-status">{pet.enabled ? '✦ 已开启 · 桌面置顶陪伴中' : '♡ 默认关闭 · 需要时再开启'}</span></div>
             </div>
             <fieldset disabled={!petReady || petSaving} className="pet-settings-controls">
               <div className="set-title"><PawPrint size={14}/> 桌面伙伴</div>
-              <label className="set-row clickable"><span className="set-label">开启桌宠</span><input type="checkbox" role="switch" checked={pet.enabled} onChange={e => changePet({ enabled: e.target.checked })}/><span className="set-hint">随应用启动和退出，关闭应用后不会自行重启</span></label>
+              <label className="set-row clickable"><span className="set-label">开启桌宠</span><input type="checkbox" role="switch" checked={pet.enabled} onChange={e => changePet({ enabled: e.target.checked })}/><span className="set-hint">默认关闭以保持启动轻快；开启后约 8 秒出现，可随时关闭</span></label>
               <div className="set-row"><span className="set-label">选择伙伴</span><div className="pet-skin-options">{(['cat', 'bunny'] as const).map(skin => <button key={skin} aria-pressed={pet.skin === skin} className={pet.skin === skin ? 'active' : ''} onClick={() => changePet({ skin })}><Mascot skin={skin}/><span>{skin === 'cat' ? '奶油猫咪' : '草莓兔兔'}</span></button>)}</div></div>
               <label className="set-row"><span className="set-label">显示大小</span><select className="set-select" value={pet.scale} onChange={e => changePet({ scale: Number(e.target.value) })}><option value="0.85">小巧 · 85%</option><option value="1">标准 · 100%</option><option value="1.15">大号 · 115%</option></select></label>
               <label className="set-row"><span className="set-label">不透明度</span><select className="set-select" value={pet.opacity} onChange={e => changePet({ opacity: Number(e.target.value) })}>{[1, .9, .8, .65, .5].map(v => <option key={v} value={v}>{Math.round(v * 100)}%</option>)}</select></label>
               <div className="set-row"><span className="set-label">桌面位置</span><button className="mini-btn" disabled={!pet.enabled} title={!pet.enabled ? '请先开启桌宠' : '把伙伴移回屏幕右下角'} onClick={async () => { const ok = await window.api.pet.reset(); showToast(ok ? '桌面伙伴已回到右下角' : '请先开启桌宠') }}><RotateCcw size={12}/> 回到右下角</button><span className="set-hint">拖动伙伴可调整位置</span></div>
             </fieldset>
-            <div className="pet-settings-note">默认只显示小宠物，鼠标移入展开今天和逾期任务，移开后收起。列表仅用滚轮滚动；拖动宠物调整位置，右键打开菜单。</div>
+            <div className="pet-settings-note">桌宠在主窗口就绪后延迟约 8 秒加载，不影响冷启动。默认只显示小宠物，鼠标移入展开今天和逾期任务，移开后收起。列表仅用滚轮滚动；拖动宠物调整位置，右键打开菜单。</div>
           </section>
           <section className="set-section" hidden={section !== 'appearance'}>
             <div className="set-title">

@@ -42,6 +42,11 @@ dist/
 .e2e-flows/
 .e2e-stress/
 .e2e-playwright/
+.e2e-virtual/
+.e2e-debug*/
+.e2e-manual/
+.perf-bench*/
+.perf-results/
 .tmp/
 
 .qa-*/

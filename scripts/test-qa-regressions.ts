@@ -3,12 +3,25 @@ import { mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
 import * as db from '../src/main/db.ts'
 import { importFromText } from '../src/main/import.ts'
+import { format } from 'date-fns'
 const dir=mkdtempSync(join(process.cwd(),'.qa-regressions-'))
 db.initDb(dir)
 try {
  const list=db.createList({name:'回归清单'})
  const parent=db.createTask({title:'往返任务',listId:list.id,scheduledDate:'2026-11-03',rrule:'FREQ=DAILY',reminderOffset:5,notes:'父备注',tagNames:['往返标签']})
  const sub=db.createTask({title:'往返子任务',parentId:parent.id,notes:'子备注'})
+ // 收件箱生命周期：无清单无日期 -> inbox；安排今天后 -> today；也许 -> 永不进 inbox。
+ const inboxTask=db.createTask({title:'收件箱生命周期'})
+ assert.ok(db.listTasks({view:'inbox'}).some(t=>t.id===inboxTask.id))
+ assert.ok(!db.listTasks({view:'today'}).some(t=>t.id===inboxTask.id))
+ assert.equal(db.getSidebar().counts.inbox,1)
+ db.updateTask(inboxTask.id,{scheduledDate:format(new Date(),'yyyy-MM-dd')})
+ assert.ok(!db.listTasks({view:'inbox'}).some(t=>t.id===inboxTask.id))
+ assert.ok(db.listTasks({view:'today'}).some(t=>t.id===inboxTask.id))
+ const maybeTask=db.createTask({title:'也许不进收件箱',someday:true})
+ assert.ok(!db.listTasks({view:'inbox'}).some(t=>t.id===maybeTask.id))
+ assert.equal(db.getSidebar().counts.inbox,0)
+ console.log('PASS 收件箱生命周期与今天隔离')
  db.setTaskStatus(parent.id,true)
  const json=db.getAllData(); const before=db.searchTasks('往返任务').map(t=>t.id)
  assert.equal(importFromText(JSON.stringify(json),'backup.json').ok,true)

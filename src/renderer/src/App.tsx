@@ -56,13 +56,20 @@ export default function App(): React.JSX.Element {
     refreshSidebar()
     refresh()
     const dv = localStorage.getItem('lighttodo.defaultView')
-    if (dv === 'upcoming' || dv === 'all' || dv === 'someday') {
+    if (dv === 'inbox' || dv === 'upcoming' || dv === 'all' || dv === 'someday') {
       setView(dv, {
         title:
-          dv === 'upcoming' ? '最近 7 天' : dv === 'all' ? '全部' : '也许'
+          dv === 'inbox'
+            ? '收件箱'
+            : dv === 'upcoming'
+              ? '最近 7 天'
+              : dv === 'all'
+                ? '全部'
+                : '也许'
       })
     }
-    const offQuick = window.api.onQuickAdd((text) => openQuickAdd(text ?? ''))
+    // 托盘 / 全局快捷键 / lighttodo://add 都是“捕获”：默认进收件箱。
+    const offQuick = window.api.onQuickAdd((text) => openQuickAdd(text ?? '', undefined, true))
     const offOpen = window.api.onOpenTask((id) => selectTaskById(id))
     const offSettings = window.api.onSettings(() => useStore.getState().openSettings())
     const offTasks = window.api.onTasksChanged(() => {
@@ -119,6 +126,31 @@ export default function App(): React.JSX.Element {
         return
       }
       if (typing || quickAddOpen || searchOpen || control) return
+
+      // 收件箱键盘 triage：无修饰键 T/M/S，仅作用于当前选中任务。
+      if (view.type === 'inbox' && selected && !mod && !e.shiftKey && !e.altKey) {
+        const key = e.key.toLowerCase()
+        if (key === 't' || key === 'm' || key === 's') {
+          e.preventDefault()
+          if (selected.status === 1) {
+            showToast('已完成的任务请先恢复再安排')
+            return
+          }
+          if (key === 't') {
+            updateTask(selected.id, { scheduledDate: format(new Date(), 'yyyy-MM-dd') })
+            showToast('已安排到今天')
+          } else if (key === 'm') {
+            updateTask(selected.id, {
+              scheduledDate: format(addDays(new Date(), 1), 'yyyy-MM-dd')
+            })
+            showToast('已安排到明天')
+          } else {
+            updateTask(selected.id, { someday: true, scheduledDate: null, dueAt: null })
+            showToast('已移到也许')
+          }
+          return
+        }
+      }
 
       if (mod && /^[1-6]$/.test(e.key)) {
         e.preventDefault()

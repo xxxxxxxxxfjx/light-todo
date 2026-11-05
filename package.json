@@ -1,6 +1,6 @@
 {
   "name": "lighttodo",
-  "version": "0.2.13",
+  "version": "0.3.0",
   "private": true,
   "description": "轻单 LightTodo — Windows 上最快的中文待办",
   "main": "./out/main/index.js",
@@ -90,7 +90,7 @@
           ]
         }
       ],
-      "icon": "build/icon.png",
+      "icon": "build/icon.ico",
       "artifactName": "LightTodo-${version}-${arch}.${ext}"
     },
     "nsis": {

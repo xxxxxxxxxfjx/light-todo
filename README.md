@@ -9,12 +9,14 @@ Windows 上最快的中文待办 —— 本地优先、键盘优先、开箱即�
 - Electron + React 19 + TypeScript + Vite 工程骨架
 - 本地 SQLite（`node:sqlite`，免原生编译），表结构含任务/清单/文件夹/标签/设置
 - 三栏主界面：侧边栏（智能视图 + 清单 + 标签）、任务列表、任务详情 / 今日概览
-- 视图：今天（逾期分组）、最近 7 天、日历、全部、也许、已完成、按清单、按标签
+- 视图：收件箱、今天（逾期分组）、最近 7 天、日历、全部、也许、已完成、按清单、按标签
+- 收件箱：未分类、未排期任务独立收集，不污染今天；支持 `T` 今天 / `M` 明天 / `S` 也许键盘 triage
 - 也许：暂不安排日期的想法独立收集，不会进入今天
 - 任务 CRUD：创建、编辑、完成、删除（软删除）、子任务、标签、优先级、计划日 / 截止日
-- 全局快速添加：`Ctrl+Shift+Space` 唤起（含中文自然语言解析、预览 chips）
+- 全局快速添加：`Ctrl+Shift+Space` 唤起（含中文自然语言解析、预览 chips）；全局捕获默认进收件箱
 - 中文 NLP：今天/明天/下周三/3月5日/今晚8点/每周一三五/每月5号/每月第2个周二/每3天/工作日/!高/#清单/@标签
 - 搜索：`Ctrl+F`，标题 / 备注 / 标签
+- 列表：超过 150 条自动虚拟滚动（`@tanstack/react-virtual`，支持可变行高），加载更多每页 500 条
 - 托盘常驻、全局快捷键、开机自启、Jump List、URL Scheme
 - 重复任务：RRULE 引擎，完成后自动生成下一次，支持按计划 / 按完成两种语义
 - 提醒：任务级提醒（准时 / 提前 5 分钟 / 15 分钟 / 1 小时 / 1 天），30 秒轮询 + 系统 Toast
@@ -22,12 +24,14 @@ Windows 上最快的中文待办 —— 本地优先、键盘优先、开箱即�
 - 设置页：数据目录、JSON / Markdown 导出、JSON / CSV 导入（TickTick/Todoist）、立即备份、开机自启
 - 数据：启动 / 退出自动备份（保留 14 份）、SQLite WAL checkpoint
 - 打包：win-unpacked + 便携版 exe + zip（NSIS 安装包在受限环境无法生成，正常机器可用）
+- 性能基准：`scripts/seed-bench-10k.ts` + `scripts/bench-perf.ts` + `docs/perf-baseline.md`；10k SQLite 热库数据已实测，干净 Win11 冷启动/内存/FPS 待实测
 
 待完成 / 后续：
 
-- 性能验收：本机 DSH 环境 Electron 启动约 4s（Chromium 软件渲染开销），应用自身开销 <1s；正常 GPU 机器预期冷启动 <1s
+- 性能验收：干净 Win11 打包版冷启动 P50 <1s / P95 <2s、常驻 <150MB、1 万条滚动 60fps 仍需在可启动 Electron 的交互式会话实测
+- 第 2 阶段后续：通知“完成/稍后”、撤销、拖拽排序、行内标题编辑
+- 第 3 阶段：Markdown 预览/checklist、FTS5 搜索、命令面板、CSV/MS To Do/ICS
 - 代码签名、自动更新（可选）
-- 看板 / 四象限 / 习惯 / 番茄钟 / 附件（v1.1 候选）
 
 ## 技术栈
 
@@ -64,9 +68,9 @@ pnpm typecheck    # 类型检查
 
 > 打包约定：每次完成代码/界面/文档改动后都要执行 `pnpm dist`，不能只交源码；版本号在 `package.json` 中递增，产物在 `release/<version>/`。
 
-当前产物：`release/0.2.13/LightTodo-0.2.13-x64.exe`（直接双击）与
-`release/0.2.13/LightTodo-0.2.13-portable.zip`（完整解压后双击 `LightTodo.exe`）。
-单文件版首次会在同目录释放 `LightTodoApp-0.2.13-<构建标识>`，日常数据保存到同目录 `LightTodoData`。
+当前产物：`release/0.3.0/LightTodo-0.3.0-x64.exe`（直接双击）与
+`release/0.3.0/LightTodo-0.3.0-portable.zip`（完整解压后双击 `LightTodo.exe`）。
+单文件版首次会在同目录释放 `LightTodoApp-0.3.0-<构建标识>`，日常数据保存到同目录 `LightTodoData`。
 启动器先按正常模式运行，并把运行时退出码记录到 `LightTodoData/launcher.log`；受限环境如出现 Chromium 初始化退出码 `0x80000003`，需从命令行加 `--no-sandbox --disable-gpu` 启动。
 构建使用本地 Electron 分发目录及 Windows 自带 .NET Framework C# 编译器。
 
@@ -157,3 +161,15 @@ node scripts/e2e-layout-theme.mjs release/0.2.9/LightTodo-0.2.9-x64.exe
 周视图定时任务按开始时间分组：同一时间的任务显示在同一个时间条下纵向堆叠，时间条高度随任务数量自动撑开；不同时间的任务各自占一行，避免横向窄列和文字挤压。
 
 回归：`node scripts/e2e-layout-theme.mjs`。
+
+## 0.3.0
+
+第 1 阶段「可信的快」+ 收件箱。详见 `docs/release-0.3.0.md` 与 `docs/perf-baseline.md`。
+
+- 超过 150 条任务自动虚拟滚动，首屏 500 条、每页 500 条；修复加载更多与刷新竞态。
+- 收件箱：全局捕获/未分类未排期任务不再进入今天；T/M/S 键盘 triage。
+- 桌宠新装默认关闭，开启后延迟约 8 秒创建；老用户保持原默认。
+- 侧栏计数一次扫描 + 清单/标签聚合，10k 热库 66–88ms → 约 22ms。
+- 备注列表回填修复，避免打开详情后误清空备注。
+- 新增 `scripts/seed-bench-10k.ts`、`scripts/bench-perf.ts`、`scripts/e2e-virtual.mjs` 与性能基线文档。
+- 回归：pnpm typecheck、pnpm test:unit 全部通过；Electron E2E/冷启动/内存/FPS 因本会话 Chromium IPC 限制未测，需干净 Win11 复跑。

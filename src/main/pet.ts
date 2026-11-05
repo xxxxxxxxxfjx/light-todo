@@ -3,14 +3,18 @@ import { join } from 'node:path'
 import { getSetting, setSetting, listTasks, getTask, setTaskStatus } from './db'
 import { DEFAULT_PET_SETTINGS, PET_SIZE, type PetSettings, type PetState } from '../shared/pet'
 
+const PET_LAZY_DELAY_MS = 8000
+
 let pet: BrowserWindow | null = null
 let saveTimer: ReturnType<typeof setTimeout> | undefined
+let petCreateTimer: ReturnType<typeof setTimeout> | undefined
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 let stopping = false
 let appliedScale = 1
 let petExpanded = false
 let cachedTasks: PetState['tasks'] = []
 let openMain: (id?: string, settings?: boolean) => void
+let launchedAt = 0
 
 export function getPetSettings(): PetSettings {
   let saved: Partial<PetSettings> = {}
@@ -28,6 +32,28 @@ function normalize(value: Partial<PetSettings>): PetSettings {
     scale: [0.85, 1, 1.15].includes(value.scale ?? 0) ? value.scale! : 1,
     opacity: typeof value.opacity === 'number' && Number.isFinite(value.opacity) ? Math.max(0.5, Math.min(1, value.opacity)) : 1
   }
+}
+
+function cancelPetCreation(): void {
+  if (petCreateTimer !== undefined) {
+    clearTimeout(petCreateTimer)
+    petCreateTimer = undefined
+  }
+}
+
+/**
+ * 主窗口就绪后调用：老用户默认开启时也晚约 8 秒再创建桌宠窗口。
+ * 期间任何显式开启都会走 syncPet 立即创建并取消这里待执行的定时器。
+ */
+export function schedulePetCreation(delayMs = PET_LAZY_DELAY_MS): void {
+  if (stopping || petCreateTimer !== undefined || pet) return
+  if (!getPetSettings().enabled) return
+  console.log(`PET_LAZY_SCHEDULED ${delayMs}`)
+  petCreateTimer = setTimeout(() => {
+    petCreateTimer = undefined
+    if (stopping || !getPetSettings().enabled) return
+    syncPet()
+  }, delayMs)
 }
 
 function state(): PetState {
@@ -88,15 +114,29 @@ function savePosition(): void {
 function updateSettings(patch: Partial<PetSettings>): PetSettings {
   if (stopping) throw new Error('应用正在退出')
   const previous = getPetSettings()
-  const settings = normalize({ ...getPetSettings(), ...patch })
+  const settings = normalize({ ...previous, ...patch })
   setSetting('pet_settings', JSON.stringify(settings))
+  const justEnabled = !previous.enabled && settings.enabled
+  let recreate = false
   if (pet && previous.scale !== settings.scale) {
     savePosition()
     clearTimeout(saveTimer)
     pet.destroy()
     pet = null
+    recreate = true
   }
-  syncPet()
+  if (!settings.enabled) {
+    // 关闭时必须取消尚未执行的懒加载，不能等 8 秒后又被定时器创建出来。
+    cancelPetCreation()
+    syncPet()
+  } else if (justEnabled || recreate) {
+    // 用户显式开启/改大小：立即创建，不等待启动后的懒加载定时器。
+    cancelPetCreation()
+    syncPet()
+  } else if (pet) {
+    syncPet()
+  }
+  // 其余情况（启用但仍在懒加载等待期）只落库，保留待执行的创建定时器。
   notifyPet()
   // Update settings when changed from the pet menu or tray as well.
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send('pet:settings', settings)
@@ -108,12 +148,14 @@ export function togglePet(): void { updateSettings({ enabled: !getPetSettings().
 function syncPet(): void {
   if (stopping) return
   if (!getPetSettings().enabled) {
+    cancelPetCreation()
     clearTimeout(saveTimer)
     pet?.destroy()
     pet = null
     return
   }
-  if (pet) { savePosition(); place(); return }
+  if (pet) { cancelPetCreation(); savePosition(); place(); return }
+  cancelPetCreation()
   petExpanded = false
   const area = screen.getPrimaryDisplay().workArea
   const scale = Math.min(getPetSettings().scale, area.width / PET_SIZE.width, area.height / PET_SIZE.height)
@@ -124,6 +166,7 @@ function syncPet(): void {
     focusable: false, thickFrame: false,
     webPreferences: { preload: join(__dirname, '../preload/pet.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, partition: 'desktop-pet' }
   })
+  console.log(`PET_CREATED ${Date.now() - launchedAt}`)
   // An isolated session keeps the main page's remembered Chromium zoom out of the pet.
   pet.webContents.setZoomFactor(1)
   pet.setAlwaysOnTop(true, 'screen-saver')
@@ -140,8 +183,9 @@ function syncPet(): void {
   } else pet.loadFile(join(__dirname, '../renderer/pet.html'))
 }
 
-export function registerPet(showMain: typeof openMain): void {
+export function registerPet(showMain: typeof openMain, startedAt = Date.now()): void {
   openMain = showMain
+  launchedAt = startedAt
   const assertPet = (sender: Electron.WebContents): void => {
     if (stopping || sender !== pet?.webContents) throw new Error('桌宠窗口已关闭')
   }
@@ -211,12 +255,14 @@ export function registerPet(showMain: typeof openMain): void {
   const reposition = (): void => { if (pet) { place(); savePosition() } }
   screen.on('display-removed', reposition)
   screen.on('display-metrics-changed', reposition)
-  syncPet()
+  // 窗口创建改由主窗口 ready-to-show 后调用 schedulePetCreation() 触发，避免拖慢冷启动。
   refreshTimer = setInterval(notifyPet, 30000) // local midnight, resume, and overdue labels
 }
 
 export function stopPet(): void {
   if (stopping) return
+  // 退出时先取消待执行的延迟创建，之后任何异步回调都不能再建出桌宠。
+  cancelPetCreation()
   savePosition()
   stopping = true
   clearTimeout(saveTimer)

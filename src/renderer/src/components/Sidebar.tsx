@@ -3,6 +3,7 @@ import {
   Calendar,
   CalendarDays,
   CheckCircle2,
+  Inbox,
   Layers,
   MoreHorizontal,
   Moon,
@@ -17,6 +18,7 @@ import { useStore } from '../store'
 import type { ViewKey } from '@shared/types'
 
 const NAV: { key: ViewKey; label: string; icon: typeof Sun }[] = [
+  { key: 'inbox', label: '收件箱', icon: Inbox },
   { key: 'today', label: '今天', icon: Sun },
   { key: 'upcoming', label: '最近 7 天', icon: CalendarDays },
   { key: 'calendar', label: '日历', icon: Calendar },
