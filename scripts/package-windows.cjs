@@ -1,6 +1,7 @@
 const {build,Platform}=require('electron-builder')
 const {execFileSync}=require('node:child_process')
 const {readFileSync,writeFileSync,renameSync,existsSync,mkdirSync}=require('node:fs')
+const crypto=require('node:crypto')
 const path=require('node:path')
 const root=path.resolve(__dirname,'..')
 const pkg=require('../package.json')
@@ -27,6 +28,18 @@ async function main(){
   execFileSync('powershell.exe',['-NoProfile','-Command',`Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory(${quote(appOut)}, ${quote(payload)}, [System.IO.Compression.CompressionLevel]::Optimal, $false)`],{cwd:root,stdio:'inherit'})
   const payloadHash=require('node:crypto').createHash('sha256').update(readFileSync(payload)).digest('hex').slice(0,12)
   execFileSync(csc,['/nologo','/target:winexe','/platform:x64','/reference:System.Windows.Forms.dll','/reference:System.IO.Compression.dll',`/win32icon:${ico}`,`/resource:${payload},LightTodo.Payload.${payloadHash}.zip`,`/out:${path.join(output,`LightTodo-${pkg.version}-x64.exe`)}`,launcherSource],{cwd:root,stdio:'inherit'})
+  const artifacts=[
+    path.join(output,`LightTodo-${pkg.version}-x64.exe`),
+    payload
+  ].map(file=>{
+    const data=readFileSync(file)
+    return {
+      name:path.basename(file),
+      bytes:data.length,
+      sha256:crypto.createHash('sha256').update(data).digest('hex')
+    }
+  })
+  writeFileSync(path.join(output,'checksums.json'),JSON.stringify({verifiedBuildFiles:artifacts.length,files:artifacts},null,2)+'\n')
   console.log('READY',path.join(output,`LightTodo-${pkg.version}-x64.exe`))
 }
 main().catch(e=>{console.error(e);process.exitCode=1})

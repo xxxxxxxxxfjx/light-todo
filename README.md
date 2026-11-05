@@ -56,15 +56,17 @@ pnpm install
 pnpm dev          # 开发模式（需要能启动 Electron 的桌面环境）
 pnpm build        # 构建到 out/
 pnpm start        # 运行已构建版本（electron .）
-pnpm dist         # 打便携版 exe + ZIP（release/0.2.9/）
+pnpm dist         # 打便携版 exe + ZIP（release/<version>/）
 pnpm dist:zip     # 打 win-unpacked，再自行压缩为 zip
 pnpm dist:setup   # 打 NSIS 安装包（在部分受限/无桌面会话环境会失败，正常机器可用）
 pnpm typecheck    # 类型检查
 ```
 
-当前产物：`release/0.2.9/LightTodo-0.2.9-x64.exe`（直接双击）与
-`release/0.2.9/LightTodo-0.2.9-portable.zip`（完整解压后双击 `LightTodo.exe`）。
-单文件版首次会在同目录释放 `LightTodoApp-0.2.9-<构建标识>`，日常数据保存到同目录 `LightTodoData`。
+> 打包约定：每次完成代码/界面/文档改动后都要执行 `pnpm dist`，不能只交源码；版本号在 `package.json` 中递增，产物在 `release/<version>/`。
+
+当前产物：`release/0.2.13/LightTodo-0.2.13-x64.exe`（直接双击）与
+`release/0.2.13/LightTodo-0.2.13-portable.zip`（完整解压后双击 `LightTodo.exe`）。
+单文件版首次会在同目录释放 `LightTodoApp-0.2.13-<构建标识>`，日常数据保存到同目录 `LightTodoData`。
 启动器先按正常模式运行；仅在观察到当前受限 Windows 环境的 Chromium 初始化退出码 `0x80000003` 时，自动以兼容模式重试，并在 `launcher.log` 留下记录。
 构建使用本地 Electron 分发目录及 Windows 自带 .NET Framework C# 编译器。
 
