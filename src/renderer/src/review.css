@@ -475,10 +475,11 @@
 .review-heatmap-legend .level-2 { background: color-mix(in srgb, var(--accent) 52%, transparent); }
 .review-heatmap-legend .level-3 { background: color-mix(in srgb, var(--accent) 82%, transparent); }
 .review-heatmap { display: grid; grid-auto-flow: column; grid-auto-columns: 12px; grid-template-rows: repeat(7, 12px); gap: 3px; padding: 12px 0 4px; overflow-x: auto; scrollbar-width: thin; }
-.review-heat-cell { width: 12px; height: 12px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.review-heat-cell { width: 12px; height: 12px; padding: 0; border: 0; border-radius: 3px; cursor: pointer; background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .review-heat-cell.level-1 { background: color-mix(in srgb, var(--accent) 28%, transparent); }
 .review-heat-cell.level-2 { background: color-mix(in srgb, var(--accent) 52%, transparent); }
 .review-heat-cell.level-3 { background: color-mix(in srgb, var(--accent) 82%, transparent); }
+.review-heat-cell:hover { transform: scale(1.18); }
 .review-heat-cell.is-today { outline: 1px solid var(--accent); outline-offset: 1px; }
 
 @media (max-width: 980px) {

@@ -34,7 +34,7 @@ function dateRangeText(first?: string, last?: string): string {
 }
 
 export function WeeklyReview(): React.JSX.Element {
-  const { setView } = useStore()
+  const { setView, setCalendarJumpDate } = useStore()
   const [data, setData] = useState<WeeklyReviewData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -316,8 +316,12 @@ export function WeeklyReview(): React.JSX.Element {
                         key={day.date}
                         role="listitem"
                         className={`review-heat-cell level-${level} ${day.date === todayKey ? 'is-today' : ''}`}
-                        title={`${format(date, 'M月d日')}：完成 ${day.completed} 项`}
-                        aria-label={`${format(date, 'M月d日')} 完成 ${day.completed} 项`}
+                        title={`${format(date, 'M月d日')}：完成 ${day.completed} 项（点击查看当天）`}
+                        aria-label={`${format(date, 'M月d日')} 完成 ${day.completed} 项，点击查看当天`}
+                        onClick={() => {
+                          setCalendarJumpDate(day.date)
+                          void setView('calendar', { title: '日历' })
+                        }}
                       />
                     })}
                   </div>

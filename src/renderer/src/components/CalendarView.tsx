@@ -46,8 +46,8 @@ function clampAgendaHeight(value: number, max: number): number {
 }
 
 export function CalendarView(): React.JSX.Element {
-  const { tasks, selected, selectTask, toggleTask, openQuickAdd, updateTask, sidebar, loading, error, refresh, setCalendarRange, setCalendarDate } = useStore()
-  const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const { tasks, selected, selectTask, toggleTask, openQuickAdd, updateTask, sidebar, loading, error, refresh, setCalendarRange, setCalendarDate, setCalendarJumpDate } = useStore()
+  const [date, setDate] = useState(() => useStore.getState().calendarJumpDate ?? format(new Date(), 'yyyy-MM-dd'))
   const [mode, setMode] = useState<Mode>(() => { const saved=localStorage.getItem('lighttodo.calendarMode'); return saved === 'week' || saved === 'day' ? saved : 'month' })
   const changeMode = (next: Mode): void => { setMode(next); localStorage.setItem('lighttodo.calendarMode', next) }
   const [showDone, setShowDone] = useState(false)
@@ -105,8 +105,9 @@ export function CalendarView(): React.JSX.Element {
 
   useEffect(() => {
     setCalendarDate(date)
+    setCalendarJumpDate(null)
     return () => setCalendarDate(null)
-  }, [date, setCalendarDate])
+  }, [date, setCalendarDate, setCalendarJumpDate])
 
   // 订阅日程只读：随可见范围拉取，设置里同步/清除后事件会重新加载。
   useEffect(() => {

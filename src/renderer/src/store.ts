@@ -47,8 +47,11 @@ interface AppStore {
   calendarRange: { from: string; to: string } | null
   /** 日历当前选中的那一天；在日历里新建任务默认落到这天。 */
   calendarDate: string | null
+  /** 从热力图等入口跳转到日历时，指定要打开的那一天。 */
+  calendarJumpDate: string | null
   setCalendarRange: (from: string, to: string) => Promise<void>
   setCalendarDate: (date: string | null) => void
+  setCalendarJumpDate: (date: string | null) => void
   loadMore: () => Promise<void>
   filter: TaskFilter
   quickAddOpen: boolean
@@ -137,7 +140,9 @@ export const useStore = create<AppStore>((set, get) => ({
   hasMore: false,
   calendarRange: null,
   calendarDate: null,
+  calendarJumpDate: null,
   setCalendarDate: (date) => set({ calendarDate: date }),
+  setCalendarJumpDate: (date) => set({ calendarJumpDate: date }),
   setCalendarRange: async (from, to) => {
     const previous = get().calendarRange
     if (previous?.from === from && previous.to === to) return
