@@ -147,7 +147,12 @@ export function registerPet(showMain: typeof openMain): void {
   }
   ipcMain.handle('pet:settings', () => getPetSettings())
   ipcMain.handle('pet:setSettings', (_e, patch: Partial<PetSettings>) => updateSettings(patch))
-  ipcMain.handle('pet:reset', () => { if (!pet) updateSettings({ enabled: true }); place(true); savePosition() })
+  ipcMain.handle('pet:reset', () => {
+    if (!pet) return false
+    place(true)
+    savePosition()
+    return true
+  })
   ipcMain.handle('pet:state', e => { assertPet(e.sender); return state() })
   ipcMain.on('pet:expanded', (e, expanded: boolean) => {
     if (stopping || e.sender !== pet?.webContents) return
@@ -173,6 +178,8 @@ export function registerPet(showMain: typeof openMain): void {
     } else if (phase === 'end') {
       drag = null
       savePosition()
+      // Return to click-through immediately: leave events are suppressed while dragging.
+      pet.setIgnoreMouseEvents(true, { forward: true })
     } else if (phase === 'move' && drag) {
       const cursor = point
       const area = screen.getDisplayNearestPoint(cursor).workArea

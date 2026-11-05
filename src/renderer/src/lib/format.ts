@@ -1,4 +1,4 @@
-import { differenceInCalendarDays, format, isToday, isTomorrow, parseISO } from 'date-fns'
+import { differenceInCalendarDays, format, isToday, isTomorrow, isValid, parseISO } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import type { Task } from '@shared/types'
 
@@ -9,6 +9,7 @@ export function parseLocalDate(s: string): Date {
 
 export function dateLabel(s: string): string {
   const d = parseLocalDate(s)
+  if (!isValid(d)) return '日期无效'
   const diff = differenceInCalendarDays(d, new Date())
   if (diff === 0) return '今天'
   if (diff === 1) return '明天'
@@ -24,6 +25,7 @@ export function dueLabel(task: Task): { text: string; tone: 'normal' | 'overdue'
   if (task.status === 1) return { text: '已完成', tone: 'muted' }
   if (task.dueAt) {
     const d = new Date(task.dueAt)
+    if (!isValid(d)) return { text: '日期无效', tone: 'muted' }
     const diff = differenceInCalendarDays(d, new Date())
     const time = format(d, 'HH:mm')
     if (d.getTime() < Date.now()) return { text: `${format(d, 'M月d日')} ${time}`, tone: 'overdue' }
@@ -33,6 +35,7 @@ export function dueLabel(task: Task): { text: string; tone: 'normal' | 'overdue'
   }
   if (task.scheduledDate) {
     const d = parseLocalDate(task.scheduledDate)
+    if (!isValid(d)) return { text: '日期无效', tone: 'muted' }
     const diff = differenceInCalendarDays(d, new Date())
     return { text: dateLabel(task.scheduledDate), tone: diff < 0 ? 'overdue' : 'normal' }
   }
@@ -43,6 +46,7 @@ export function groupLabel(task: Task): string {
   if (task.scheduledDate) return dateLabel(task.scheduledDate)
   if (task.dueAt) {
     const d = new Date(task.dueAt)
+    if (!isValid(d)) return '日期无效'
     if (isToday(d)) return '今天'
     if (isTomorrow(d)) return '明天'
     return format(d, 'M月d日 EEEE', { locale: zhCN })

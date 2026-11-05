@@ -14,7 +14,7 @@ import {
 import { join } from 'node:path'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { release } from 'node:os'
-import { initDb, closeDb, getDueReminders, getSetting, setSetting, markReminderSent } from './db'
+import { initDb, closeDb, getDueReminders, getSetting, setSetting, markReminderSent, purgeTrash } from './db'
 import { windowColors, type ThemePreference } from './window-theme'
 import { registerIpc } from './ipc'
 import { backupNow, registerDataIpc } from './data'
@@ -430,6 +430,8 @@ function setupIntegration(): void {
 if (ownsInstance) app.whenReady().then(() => {
   app.setAppUserModelId('com.lighttodo.app')
   initDb(resolveDataDir())
+  // Trash keeps items for 30 days; clean up old entries on every startup.
+  purgeTrash()
   const savedTheme = getSetting('ui_theme')
   nativeTheme.themeSource = savedTheme === 'light' || savedTheme === 'dark' ? savedTheme : 'system'
   ipcMain.handle('app:setTheme', (_event, theme: ThemePreference) => {
@@ -465,8 +467,16 @@ if (ownsInstance) app.whenReady().then(() => {
 
 app.on('second-instance', (_e, argv) => {
   const url = argv.find((a) => a.startsWith('lighttodo://'))
-  if (url) handleProtocolUrl(url)
-  else showMain()
+  if (url) {
+    handleProtocolUrl(url)
+    return
+  }
+  if (argv.includes('--quick-add')) {
+    quickAdd()
+    return
+  }
+  if (argv.includes('--hidden')) return
+  showMain()
 })
 
 app.on('window-all-closed', () => {

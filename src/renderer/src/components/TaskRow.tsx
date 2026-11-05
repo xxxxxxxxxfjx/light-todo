@@ -25,7 +25,13 @@ export function TaskRow({ task }: { task: Task }): React.JSX.Element {
         task.status === 1 ? 'done' : ''
       }`}
       onClick={() => (selectMode ? toggleSelectId(task.id) : selectTask(task.id))}
-      onDoubleClick={() => !selectMode && toggleTask(task.id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          if (selectMode) toggleSelectId(task.id)
+          else selectTask(task.id)
+        }
+      }}
       role="button"
       tabIndex={0}
     >
@@ -41,6 +47,7 @@ export function TaskRow({ task }: { task: Task }): React.JSX.Element {
             e.stopPropagation()
             toggleTask(task.id)
           }}
+          onDoubleClick={(e) => e.stopPropagation()}
           aria-label={task.status === 1 ? '标记未完成' : '完成'}
         >
           <Check size={12} strokeWidth={3} />

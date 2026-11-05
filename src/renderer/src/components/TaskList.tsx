@@ -26,13 +26,17 @@ const FILTERS_BY_VIEW: Record<string, TaskFilter[]> = {
 
 function dayKey(t: Task): string {
   if (t.scheduledDate) return t.scheduledDate
-  if (t.dueAt) return format(new Date(t.dueAt), 'yyyy-MM-dd')
+  if (t.dueAt) {
+    const d = new Date(t.dueAt)
+    if (!Number.isNaN(d.getTime())) return format(d, 'yyyy-MM-dd')
+  }
   return 'none'
 }
 
 function dayTitle(key: string): string {
   if (key === 'none') return '无日期'
   const d = parseLocalDate(key)
+  if (Number.isNaN(d.getTime())) return '日期无效'
   const diff = differenceInCalendarDays(d, new Date())
   const w = format(d, 'EEEE', { locale: zhCN })
   if (diff === 0) return `今天 · ${w}`
@@ -64,10 +68,12 @@ export function TaskList(): React.JSX.Element {
     batchComplete,
     batchDelete,
     batchRestore,
-    batchPurge
+    batchPurge,
+    batchBusy
   } = useStore()
 
   const visible = tasks.filter((t) => matchFilter(t, filter))
+  const filteredEmpty = !loading && visible.length === 0 && tasks.length > 0 && filter !== 'all'
   const visibleFilters = FILTERS.filter((f) =>
     (FILTERS_BY_VIEW[view.type] ?? ['all']).includes(f.key)
   )
@@ -84,7 +90,7 @@ export function TaskList(): React.JSX.Element {
     const map = new Map<string, Task[]>()
     for (const t of visible) {
       const key =
-        view.type === 'completed' && t.completedAt
+        view.type === 'completed' && t.completedAt && !Number.isNaN(new Date(t.completedAt).getTime())
           ? format(new Date(t.completedAt), 'yyyy-MM-dd')
           : dayKey(t)
       if (!map.has(key)) map.set(key, [])
@@ -95,6 +101,13 @@ export function TaskList(): React.JSX.Element {
       label: dayTitle(key),
       tasks: list
     }))
+    if (view.type === 'upcoming') {
+      sections.sort((a, b) => {
+        if (a.key === 'none') return 1
+        if (b.key === 'none') return -1
+        return a.key.localeCompare(b.key)
+      })
+    }
   } else {
     sections = visible.length ? [{ key: 'all', label: '', tasks: visible }] : []
   }
@@ -119,31 +132,33 @@ export function TaskList(): React.JSX.Element {
           >
             {selectMode ? '退出多选' : '多选'}
           </button>
-          <button className="ghost-btn" onClick={() => openQuickAdd()}>
-            <Plus size={15} />
-            添加任务
-          </button>
+          {!['completed', 'trash'].includes(view.type) && (
+            <button className="ghost-btn" onClick={() => openQuickAdd()}>
+              <Plus size={15} />
+              添加任务
+            </button>
+          )}
         </div>
       </header>
 
       {selectMode && (
-        <div className="bulk-bar">
-          <span>已选 {selectedIds.length} 项</span>
-          <button className="mini-btn" onClick={selectAll}>
+        <div className="bulk-bar" aria-busy={batchBusy}>
+          <span>{batchBusy ? '正在处理…' : `已选 ${selectedIds.length} 项`}</span>
+          <button className="mini-btn" onClick={selectAll} disabled={batchBusy}>
             全选
           </button>
           {view.type === 'trash' ? (
             <>
               <button
                 className="mini-btn"
-                disabled={!selectedIds.length}
+                disabled={!selectedIds.length || batchBusy}
                 onClick={() => batchRestore()}
               >
                 恢复
               </button>
               <button
                 className="mini-btn danger"
-                disabled={!selectedIds.length}
+                disabled={!selectedIds.length || batchBusy}
                 onClick={() => {
                   if (window.confirm(`彻底删除选中的 ${selectedIds.length} 项？此操作不可撤销。`)) {
                     batchPurge()
@@ -158,7 +173,7 @@ export function TaskList(): React.JSX.Element {
               {view.type !== 'completed' && (
                 <button
                   className="mini-btn"
-                  disabled={!selectedIds.length}
+                  disabled={!selectedIds.length || batchBusy}
                   onClick={() => batchComplete()}
                 >
                   完成
@@ -166,14 +181,18 @@ export function TaskList(): React.JSX.Element {
               )}
               <button
                 className="mini-btn danger"
-                disabled={!selectedIds.length}
-                onClick={() => batchDelete()}
+                disabled={!selectedIds.length || batchBusy}
+                onClick={() => {
+                  if (window.confirm(`把选中的 ${selectedIds.length} 项移到回收站？`)) {
+                    batchDelete()
+                  }
+                }}
               >
                 删除
               </button>
             </>
           )}
-          <button className="mini-btn" onClick={clearSelection}>
+          <button className="mini-btn" onClick={clearSelection} disabled={batchBusy}>
             取消
           </button>
         </div>
@@ -202,17 +221,30 @@ export function TaskList(): React.JSX.Element {
         {error && <div className="list-error" role="alert">{error} <button className="mini-btn" onClick={() => refresh()}>重试</button></div>}
         {loading && visible.length === 0 && <div className="list-loading">加载中…</div>}
 
-        {!loading && visible.length === 0 && (
+        {!loading && !error && visible.length === 0 && (
           <div className="empty">
             <div className="empty-icon">
               <Sparkles size={22} />
             </div>
-            <div className="empty-title">{emptyTitle(view.type)}</div>
-            <div className="empty-sub">按 Ctrl+Shift+Space 随时记下一条，或在下方输入</div>
-            {view.type !== 'trash' && (
-              <button className="primary-btn" onClick={() => openQuickAdd()}>
-                <Plus size={15} /> 新建任务
+            <div className="empty-title">
+              {filteredEmpty ? '没有符合筛选条件的任务' : emptyTitle(view.type)}
+            </div>
+            <div className="empty-sub">
+              {filteredEmpty
+                ? '当前筛选把已有任务隐藏了，清除筛选即可看到它们。'
+                : '按 Ctrl+Shift+Space 随时记下一条，或在下方输入'}
+            </div>
+            {filteredEmpty ? (
+              <button className="primary-btn" onClick={() => setFilter('all')}>
+                清除筛选
               </button>
+            ) : (
+              view.type !== 'trash' &&
+              view.type !== 'completed' && (
+                <button className="primary-btn" onClick={() => openQuickAdd()}>
+                  <Plus size={15} /> 新建任务
+                </button>
+              )
             )}
           </div>
         )}
@@ -277,7 +309,7 @@ export function TaskList(): React.JSX.Element {
           ))
         )}
 
-        {!loading && visible.length === 0 && !['completed', 'trash'].includes(view.type) && (
+        {!loading && !filteredEmpty && visible.length === 0 && !['completed', 'trash'].includes(view.type) && (
           <div className="list-footnote">任务会保存在本机，退出也不会丢</div>
         )}
       </div>

@@ -109,4 +109,5 @@ export interface AppInfo {
   version: string
   dataDir: string
   platform: string
+  theme?: 'system' | 'light' | 'dark'
 }

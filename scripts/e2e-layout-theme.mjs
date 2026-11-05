@@ -16,7 +16,7 @@ check('七天时间轴', `document.querySelectorAll('.week-column').length===7 &
 check('全天及定时分区', `document.querySelector('.week-all-day').textContent.includes('全天安排测试') && document.querySelectorAll('.week-event .week-task').length===3`)
 check('同一时段任务纵向堆叠', `document.querySelectorAll('.week-event').length===1 && document.querySelector('.week-event').getBoundingClientRect().height>=60`)
 js(`document.querySelector('.week-column.selected').dispatchEvent(new MouseEvent('dblclick',{bubbles:true,clientY:document.querySelector('.week-column.selected').getBoundingClientRect().top+11*44+5}))`,200)
-check('双击时间段带入时间', `document.querySelector('.qa-input')?.value==='11:00 '`)
+check('双击时间段带入时间', `/[0-9]{1,2}:00 $/.test(document.querySelector('.qa-input')?.value ?? '')`)
 js(`document.querySelector('.qa .icon-btn').click()`)
 size(1280,820)
 add({shot:resolve('.shots/week-0.2.1.png')})

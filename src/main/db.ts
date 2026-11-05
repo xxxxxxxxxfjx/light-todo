@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { addDays, format, startOfDay } from 'date-fns'
+import { addDays, format, isValid, parseISO, startOfDay } from 'date-fns'
 import rrulePkg from 'rrule'
 
 const { RRule } = rrulePkg
@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   notified_at    TEXT,
   completed_at   TEXT,
   deleted_at     TEXT,
+  deleted_batch  TEXT,
   sort_order     REAL NOT NULL DEFAULT 0,
   created_at     TEXT NOT NULL,
   updated_at     TEXT NOT NULL
@@ -121,6 +122,7 @@ export function initDb(dir: string): void {
   ensureColumn('tasks', 'reminder_offset', 'INTEGER')
   ensureColumn('tasks', 'notified_at', 'TEXT')
   ensureColumn('tasks', 'next_occurrence_id', 'TEXT')
+  ensureColumn('tasks', 'deleted_batch', 'TEXT')
   const hadSomeday = conn()
     .prepare('PRAGMA table_info(tasks)')
     .all()
@@ -204,62 +206,101 @@ function dayStr(d: Date): string {
   return format(d, 'yyyy-MM-dd')
 }
 
+function assertDateField(value: unknown, label: string, dateOnly: boolean): void {
+  if (value === null || value === undefined || value === '') return
+  if (typeof value !== 'string') throw new Error(`${label}格式无效`)
+  const date = dateOnly ? parseISO(value) : new Date(value)
+  if (!isValid(date)) throw new Error(`${label}格式无效`)
+  if (dateOnly && format(date, 'yyyy-MM-dd') !== value) throw new Error(`${label}格式无效`)
+}
+
+function assertRrule(rule: unknown): void {
+  if (rule === null || rule === undefined || rule === '') return
+  if (typeof rule !== 'string') throw new Error('重复规则无效')
+  try {
+    RRule.parseString(rule)
+  } catch {
+    throw new Error('重复规则无效')
+  }
+}
+
+function validateTaskFields(input: {
+  scheduledDate?: string | null
+  dueAt?: string | null
+  reminderAt?: string | null
+  rrule?: string | null
+}): void {
+  assertDateField(input.scheduledDate, '计划日期', true)
+  assertDateField(input.dueAt, '截止时间', false)
+  assertDateField(input.reminderAt, '提醒时间', false)
+  assertRrule(input.rrule)
+}
+
 function seedIfEmpty(): void {
-  const row = conn().prepare('SELECT COUNT(*) AS c FROM lists').get() as { c: number }
-  if (row.c > 0) return
+  const listCount = conn().prepare('SELECT COUNT(*) AS c FROM lists').get() as { c: number }
+  const taskCount = conn().prepare('SELECT COUNT(*) AS c FROM tasks').get() as { c: number }
+  // A user may legitimately delete every list/task. Once seeded (or once the
+  // database already has data), never re-create demo content.
+  if (listCount.c > 0 || taskCount.c > 0 || getSetting('seeded') === '1') {
+    if (getSetting('seeded') !== '1') setSetting('seeded', '1')
+    return
+  }
 
-  const folderId = randomUUID()
-  const workId = randomUUID()
-  const lifeId = randomUUID()
-  const now = nowIso()
-  const today = dayStr(new Date())
+  transaction(() => {
+    const folderId = randomUUID()
+    const workId = randomUUID()
+    const lifeId = randomUUID()
+    const now = nowIso()
+    const today = dayStr(new Date())
 
-  conn().prepare('INSERT INTO folders (id,name,sort_order,created_at) VALUES (?,?,?,?)').run(
-    folderId,
-    '工作',
-    0,
-    now
-  )
-  const insertList = conn().prepare(
-    'INSERT INTO lists (id,folder_id,name,color,icon,sort_order,created_at) VALUES (?,?,?,?,?,?,?)'
-  )
-  insertList.run(workId, folderId, '工作', '#0f6cbd', '💼', 0, now)
-  insertList.run(lifeId, null, '生活', '#3a9a5b', '🌿', 1024, now)
+    conn().prepare('INSERT INTO folders (id,name,sort_order,created_at) VALUES (?,?,?,?)').run(
+      folderId,
+      '工作',
+      0,
+      now
+    )
+    const insertList = conn().prepare(
+      'INSERT INTO lists (id,folder_id,name,color,icon,sort_order,created_at) VALUES (?,?,?,?,?,?,?)'
+    )
+    insertList.run(workId, folderId, '工作', '#0f6cbd', '💼', 0, now)
+    insertList.run(lifeId, null, '生活', '#3a9a5b', '🌿', 1024, now)
 
-  const tagUrgent = randomUUID()
-  const tagReport = randomUUID()
-  conn().prepare('INSERT INTO tags (id,name,color) VALUES (?,?,?)').run(tagUrgent, '紧急', '#d13438')
-  conn().prepare('INSERT INTO tags (id,name,color) VALUES (?,?,?)').run(tagReport, '汇报', '#8764b8')
+    const tagUrgent = randomUUID()
+    const tagReport = randomUUID()
+    conn().prepare('INSERT OR IGNORE INTO tags (id,name,color) VALUES (?,?,?)').run(tagUrgent, '紧急', '#d13438')
+    conn().prepare('INSERT OR IGNORE INTO tags (id,name,color) VALUES (?,?,?)').run(tagReport, '汇报', '#8764b8')
 
-  const welcome = createTask({
-    title: '欢迎使用轻单 👋',
-    notes:
-      '这是一个本地优先的待办应用：\n\n- 按 **Ctrl+Shift+Space** 随时记下想法\n- 在左侧创建清单，用 `#清单` 和 `@标签` 快速归类\n- 所有数据都保存在你自己的电脑上',
-    listId: null,
-    scheduledDate: today,
-    priority: 1
+    const welcome = createTask({
+      title: '欢迎使用轻单 👋',
+      notes:
+        '这是一个本地优先的待办应用：\n\n- 按 **Ctrl+Shift+Space** 随时记下想法\n- 在左侧创建清单，用 `#清单` 和 `@标签` 快速归类\n- 所有数据都保存在你自己的电脑上',
+      listId: null,
+      scheduledDate: today,
+      priority: 1
+    })
+    const syntax = createTask({
+      title: '试试一句话添加任务',
+      notes: '在输入框里试试：\n\n明天下午3点 交周报 #工作 @汇报 !高\n\n日期、时间、重复、清单、标签、优先级会被自动识别。',
+      listId: null,
+      scheduledDate: today,
+      priority: 2
+    })
+    const first = createTask({
+      title: '在左侧「工作」清单里添加第一条真实任务',
+      listId: workId,
+      scheduledDate: today,
+      priority: 0
+    })
+    reorderTasks([
+      { id: welcome.id, sortOrder: 1024 },
+      { id: syntax.id, sortOrder: 2048 },
+      { id: first.id, sortOrder: 3072 }
+    ])
+    conn()
+      .prepare('INSERT OR IGNORE INTO task_tags (task_id, tag_id) VALUES (?,?)')
+      .run(syntax.id, tagReport)
+    setSetting('seeded', '1')
   })
-  const syntax = createTask({
-    title: '试试一句话添加任务',
-    notes: '在输入框里试试：\n\n明天下午3点 交周报 #工作 @汇报 !高\n\n日期、时间、重复、清单、标签、优先级会被自动识别。',
-    listId: null,
-    scheduledDate: today,
-    priority: 2
-  })
-  const first = createTask({
-    title: '在左侧「工作」清单里添加第一条真实任务',
-    listId: workId,
-    scheduledDate: today,
-    priority: 0
-  })
-  reorderTasks([
-    { id: welcome.id, sortOrder: 1024 },
-    { id: syntax.id, sortOrder: 2048 },
-    { id: first.id, sortOrder: 3072 }
-  ])
-  conn()
-    .prepare('INSERT OR IGNORE INTO task_tags (task_id, tag_id) VALUES (?,?)')
-    .run(syntax.id, tagReport)
 }
 
 function mapTask(r: Record<string, unknown>): Task {
@@ -433,6 +474,7 @@ function ensureTags(names: string[]): string[] {
 
 export function createTask(input: CreateTaskInput): Task {
   if (typeof input.title !== 'string' || !input.title.trim()) throw new Error('任务标题不能为空')
+  validateTaskFields(input)
   const id = randomUUID()
   const now = nowIso()
   let listId = input.listId ?? null
@@ -485,6 +527,7 @@ export function updateTask(id: string, patch: UpdateTaskInput): Task {
 
 function applyTaskUpdate(id: string, patch: UpdateTaskInput): Task {
   if (patch.title !== undefined && !patch.title.trim()) throw new Error('任务标题不能为空')
+  validateTaskFields(patch)
   const fields: string[] = []
   const params: unknown[] = []
   const set = (col: string, val: unknown): void => {
@@ -501,8 +544,12 @@ function applyTaskUpdate(id: string, patch: UpdateTaskInput): Task {
   if (patch.dueAt !== undefined) set('due_at', patch.dueAt)
   if (patch.scheduledDate) set('someday', 0)
   if (patch.dueAt) set('someday', 0)
+  // A concrete due time means the task is no longer an all-day item.
+  if (patch.dueAt !== undefined && patch.dueAt !== null && patch.dueAllDay === undefined) {
+    set('due_all_day', 0)
+  }
   if (patch.dueAllDay !== undefined) set('due_all_day', patch.dueAllDay)
-  if (patch.rrule !== undefined) set('rrule', patch.rrule)
+  if (patch.rrule !== undefined) set('rrule', patch.rrule || null)
   if (patch.repeatFrom !== undefined) set('repeat_from', patch.repeatFrom)
   if (patch.reminderAt !== undefined) set('reminder_at', patch.reminderAt)
   if (patch.reminderOffset !== undefined) set('reminder_offset', patch.reminderOffset)
@@ -569,11 +616,13 @@ function changeTaskStatus(id: string, done: boolean): void {
     id
   )
   if (done) {
-    conn0
-      .prepare('UPDATE tasks SET status = 1, completed_at = ?, updated_at = ? WHERE parent_id = ? AND deleted_at IS NULL')
-      .run(now, now, id)
-  }
-  if (done) {
+    // Completing a parent completes the whole subtree, including grandchildren.
+    conn0.prepare(`WITH RECURSIVE children(id) AS (
+      SELECT id FROM tasks WHERE parent_id = ? AND deleted_at IS NULL
+      UNION ALL
+      SELECT t.id FROM tasks t JOIN children c ON t.parent_id = c.id WHERE t.deleted_at IS NULL
+    ) UPDATE tasks SET status = 1, completed_at = ?, updated_at = ?, reminder_at = NULL
+      WHERE id IN (SELECT id FROM children)`).run(id, now, now)
     conn0.prepare('UPDATE tasks SET reminder_at = NULL WHERE id = ?').run(id)
   } else {
     conn0.prepare('UPDATE tasks SET reminder_at = ?, notified_at = NULL WHERE id = ?')
@@ -582,48 +631,81 @@ function changeTaskStatus(id: string, done: boolean): void {
 }
 
 function spawnNextOccurrence(task: Task): void {
-    const existing = conn().prepare('SELECT next_occurrence_id FROM tasks WHERE id=?').get(task.id) as { next_occurrence_id: string | null }
-    // Completion can be undone; each source occurrence can create its successor only once.
-    if (existing.next_occurrence_id) return
-    let base: Date | null = null
-    if (task.repeatFrom === 'completion') {
-      base = new Date()
-    } else if (task.dueAt) {
-      base = new Date(task.dueAt)
-    } else if (task.scheduledDate) {
-      const [y, m, d] = task.scheduledDate.split('-').map(Number)
-      base = new Date(y, (m ?? 1) - 1, d ?? 1, 9, 0, 0, 0)
-    }
-    if (!base || !task.rrule) return
-    const rule = new RRule({ ...RRule.parseString(task.rrule), dtstart: base })
-    const next = rule.after(base, false)
-    if (!next) return
+  const existing = conn()
+    .prepare('SELECT next_occurrence_id FROM tasks WHERE id=?')
+    .get(task.id) as { next_occurrence_id: string | null } | undefined
+  // Completion can be undone; each source occurrence can create its successor
+  // only once. If that successor was deleted (or purged), forget the stale
+  // pointer so a later completion can rebuild the chain.
+  if (existing?.next_occurrence_id) {
+    const successor = conn()
+      .prepare('SELECT id FROM tasks WHERE id = ? AND deleted_at IS NULL')
+      .get(existing.next_occurrence_id) as { id: string } | undefined
+    if (successor) return
+    conn().prepare('UPDATE tasks SET next_occurrence_id = NULL WHERE id = ?').run(task.id)
+  }
+  if (!task.rrule) return
+  let base: Date | null = null
+  if (task.repeatFrom === 'completion') {
+    base = new Date()
+  } else if (task.dueAt) {
+    base = new Date(task.dueAt)
+  } else if (task.scheduledDate) {
+    const [y, m, d] = task.scheduledDate.split('-').map(Number)
+    base = new Date(y, (m ?? 1) - 1, d ?? 1, 9, 0, 0, 0)
+  } else {
+    // A repeat rule without a date used to silently stop the chain.
+    base = new Date()
+    base.setHours(9, 0, 0, 0)
+  }
+  const rule = new RRule({ ...RRule.parseString(task.rrule), dtstart: base })
+  const next = rule.after(base, false)
+  if (!next) return
 
-    const nextDate = format(next, 'yyyy-MM-dd')
-    let nextDue: string | null = null
-    if (task.dueAt) {
-      const original = new Date(task.dueAt)
-      const d = new Date(next)
-      d.setHours(original.getHours(), original.getMinutes(), 0, 0)
-      nextDue = d.toISOString()
-    }
-    const created = createTask({
-      title: task.title,
-      notes: task.notes,
-      listId: task.listId,
-      priority: task.priority,
-      scheduledDate: nextDate,
-      dueAt: nextDue,
-      dueAllDay: task.dueAllDay,
-      rrule: task.rrule,
-      repeatFrom: task.repeatFrom,
-      reminderOffset: task.reminderOffset,
-      tagNames: task.tags.map((t) => t.name)
+  const nextDate = format(next, 'yyyy-MM-dd')
+  let nextDue: string | null = null
+  if (task.dueAt) {
+    const original = new Date(task.dueAt)
+    const d = new Date(next)
+    d.setHours(original.getHours(), original.getMinutes(), 0, 0)
+    nextDue = d.toISOString()
+  }
+  const created = createTask({
+    title: task.title,
+    notes: task.notes,
+    listId: task.listId,
+    priority: task.priority,
+    scheduledDate: nextDate,
+    dueAt: nextDue,
+    dueAllDay: task.dueAllDay,
+    rrule: task.rrule,
+    repeatFrom: task.repeatFrom,
+    reminderOffset: task.reminderOffset,
+    tagNames: task.tags.map((t) => t.name)
+  })
+  conn().prepare('UPDATE tasks SET next_occurrence_id=? WHERE id=?').run(created.id, task.id)
+  cloneSubtasks(task.id, created.id)
+}
+
+function cloneSubtasks(sourceParentId: string, targetParentId: string): void {
+  const children = conn()
+    .prepare(
+      `SELECT t.*, ${TAGS_SUBQUERY} FROM tasks t
+       WHERE t.parent_id = ? AND t.deleted_at IS NULL ORDER BY t.sort_order ASC, t.created_at ASC`
+    )
+    .all(sourceParentId) as Record<string, unknown>[]
+  for (const row of children) {
+    const sub = mapTask(row)
+    const copy = createTask({
+      title: sub.title,
+      notes: sub.notes,
+      parentId: targetParentId,
+      priority: sub.priority,
+      dueAllDay: sub.dueAllDay,
+      tagNames: sub.tags.map((t) => t.name)
     })
-    conn().prepare('UPDATE tasks SET next_occurrence_id=? WHERE id=?').run(created.id, task.id)
-    for (const sub of task.subtasks ?? []) {
-      createTask({ title: sub.title, notes: sub.notes, parentId: created.id, priority: sub.priority, tagNames: sub.tags.map(t => t.name) })
-    }
+    cloneSubtasks(sub.id, copy.id)
+  }
 }
 
 export function getDueReminders(nowIsoStr: string): Task[] {
@@ -644,27 +726,70 @@ export function markReminderSent(id: string): void {
 
 export function deleteTask(id: string): void {
   const now = nowIso()
+  const batch = randomUUID()
   const c = conn()
-  c.prepare('UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE id = ?').run(now, now, id)
-  c.prepare('UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE parent_id = ?').run(now, now, id)
+  c.prepare(`WITH RECURSIVE children(id) AS (
+    SELECT id FROM tasks WHERE id = ?
+    UNION ALL
+    SELECT t.id FROM tasks t JOIN children c ON t.parent_id = c.id
+  ) UPDATE tasks SET deleted_at = ?, deleted_batch = ?, updated_at = ? WHERE id IN (SELECT id FROM children) AND deleted_at IS NULL`)
+    .run(id, now, batch, now)
+  // A deleted successor must not block rebuilding the repeat chain later.
+  c.prepare(`UPDATE tasks SET next_occurrence_id = NULL WHERE next_occurrence_id IN (
+    SELECT id FROM tasks WHERE deleted_at IS NOT NULL
+  )`).run()
 }
 
 export function restoreTask(id: string): void {
   const now = nowIso()
   const c = conn()
-  c.prepare('UPDATE tasks SET deleted_at = NULL, updated_at = ? WHERE id = ?').run(now, id)
-  c.prepare('UPDATE tasks SET deleted_at = NULL, updated_at = ? WHERE parent_id = ?').run(now, id)
+  const root = c.prepare('SELECT deleted_at, deleted_batch FROM tasks WHERE id = ?').get(id) as
+    | { deleted_at: string | null; deleted_batch: string | null }
+    | undefined
+  if (!root?.deleted_at) return
+  // Restore only the batch that was deleted together with the root. A child
+  // deleted earlier (different batch) stays in the trash.
+  if (root.deleted_batch) {
+    c.prepare(`WITH RECURSIVE children(id) AS (
+      SELECT id FROM tasks WHERE id = ?
+      UNION ALL
+      SELECT t.id FROM tasks t JOIN children c ON t.parent_id = c.id
+    ) UPDATE tasks SET deleted_at = NULL, deleted_batch = NULL, updated_at = ? WHERE id IN (SELECT id FROM children) AND deleted_batch = ?`)
+      .run(id, now, root.deleted_batch)
+  } else {
+    c.prepare(`WITH RECURSIVE children(id) AS (
+      SELECT id FROM tasks WHERE id = ?
+      UNION ALL
+      SELECT t.id FROM tasks t JOIN children c ON t.parent_id = c.id
+    ) UPDATE tasks SET deleted_at = NULL, updated_at = ? WHERE id IN (SELECT id FROM children) AND deleted_at = ?`)
+      .run(id, now, root.deleted_at)
+  }
 }
 
 export function purgeTrash(): void {
-  conn().prepare("DELETE FROM tasks WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now','-30 days')").run()
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+  const c = conn()
+  c.prepare(`UPDATE tasks SET next_occurrence_id = NULL WHERE next_occurrence_id IN (
+    SELECT id FROM tasks WHERE deleted_at IS NOT NULL AND deleted_at < ?
+  )`).run(cutoff)
+  c.prepare('DELETE FROM tasks WHERE deleted_at IS NOT NULL AND deleted_at < ?').run(cutoff)
 }
 
 export function purgeTask(id: string): void {
   const c = conn()
-  c.prepare('DELETE FROM task_tags WHERE task_id = ?').run(id)
-  c.prepare('DELETE FROM tasks WHERE parent_id = ?').run(id)
-  c.prepare('DELETE FROM tasks WHERE id = ?').run(id)
+  const ids = c
+    .prepare(`WITH RECURSIVE children(id) AS (
+      SELECT id FROM tasks WHERE id = ?
+      UNION ALL
+      SELECT t.id FROM tasks t JOIN children c ON t.parent_id = c.id
+    ) SELECT id FROM children`)
+    .all(id) as { id: string }[]
+  const idList = ids.map((row) => row.id)
+  if (!idList.length) return
+  const marks = idList.map(() => '?').join(',')
+  c.prepare(`UPDATE tasks SET next_occurrence_id = NULL WHERE next_occurrence_id IN (${marks})`).run(...(idList as never[]))
+  c.prepare(`DELETE FROM task_tags WHERE task_id IN (${marks})`).run(...(idList as never[]))
+  c.prepare(`DELETE FROM tasks WHERE id IN (${marks})`).run(...(idList as never[]))
 }
 
 export function reorderTasks(items: { id: string; sortOrder: number }[]): void {
@@ -689,6 +814,18 @@ export function createFolder(name: string): Folder {
   const max = conn().prepare('SELECT MAX(sort_order) AS m FROM folders').get() as { m: number | null }
   conn().prepare('INSERT INTO folders (id,name,sort_order,created_at) VALUES (?,?,?,?)').run(id, name, (max.m ?? 0) + 1024, now)
   return { id, name, sortOrder: (max.m ?? 0) + 1024, createdAt: now }
+}
+
+export function updateFolder(id: string, name: string): void {
+  const trimmed = name.trim()
+  if (!trimmed) throw new Error('文件夹名称不能为空')
+  conn().prepare('UPDATE folders SET name = ? WHERE id = ?').run(trimmed, id)
+}
+
+export function deleteFolder(id: string): void {
+  const c = conn()
+  c.prepare('UPDATE lists SET folder_id = NULL WHERE folder_id = ?').run(id)
+  c.prepare('DELETE FROM folders WHERE id = ?').run(id)
 }
 
 export function getLists(): List[] {
@@ -772,7 +909,7 @@ export function getTags(): Tag[] {
   const rows = conn()
     .prepare(
       `SELECT tg.*, (SELECT COUNT(*) FROM task_tags tt JOIN tasks t ON t.id = tt.task_id
-        WHERE tt.tag_id = tg.id AND t.deleted_at IS NULL AND t.status = 0) AS cnt
+        WHERE tt.tag_id = tg.id AND t.deleted_at IS NULL AND t.status = 0 AND t.parent_id IS NULL) AS cnt
        FROM tags tg ORDER BY tg.name ASC`
     )
     .all() as Record<string, unknown>[]
@@ -817,12 +954,13 @@ export function clearCompleted(): number {
     .prepare('SELECT id FROM tasks WHERE status = 1 AND deleted_at IS NULL')
     .all() as { id: string }[]
   if (!ids.length) return 0
+  c.prepare(`UPDATE tasks SET next_occurrence_id = NULL WHERE next_occurrence_id IN (
+    SELECT id FROM tasks WHERE status = 1 AND deleted_at IS NULL
+  )`).run()
   const delTag = c.prepare('DELETE FROM task_tags WHERE task_id = ?')
-  const delSub = c.prepare('DELETE FROM tasks WHERE parent_id = ?')
   const del = c.prepare('DELETE FROM tasks WHERE id = ?')
   for (const { id } of ids) {
     delTag.run(id)
-    delSub.run(id)
     del.run(id)
   }
   return ids.length

@@ -37,7 +37,7 @@ const VIEWS = [
 ]
 
 export function SettingsModal(): React.JSX.Element {
-  const { closeSettings, showToast, refresh, refreshSidebar, sidebar } = useStore()
+  const { closeSettings, showToast, refresh, refreshSidebar, sidebar, view, setView } = useStore()
   const [info, setInfo] = useState<{ version: string; dataDir: string } | null>(null)
   const [login, setLogin] = useState(false)
   const [backups, setBackups] = useState<Backup[]>([])
@@ -75,6 +75,36 @@ export function SettingsModal(): React.JSX.Element {
     return window.api.pet.onSettings(setPet)
   }, [])
 
+  useEffect(() => {
+    const dialog = document.querySelector<HTMLElement>('.settings')
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape' && !event.isComposing) {
+        event.preventDefault()
+        closeSettings()
+        return
+      }
+      if (event.key !== 'Tab' || !dialog) return
+      const focusable = [
+        ...dialog.querySelectorAll<HTMLElement>(
+          'button, input, select, textarea, [href], [tabindex]:not([tabindex="-1"])'
+        )
+      ].filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null)
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    dialog?.querySelector<HTMLElement>('.settings-tabs button, button')?.focus()
+    return () => window.removeEventListener('keydown', onKey)
+  }, [closeSettings])
+
   const applyTheme = (t: string): void => {
     setTheme(t)
     localStorage.setItem('lighttodo.theme', t)
@@ -106,6 +136,9 @@ export function SettingsModal(): React.JSX.Element {
       await window.api.tags.update(id, { name })
       await refreshSidebar()
       await refresh()
+      if (view.type === 'tag' && view.tagId === id) {
+        await setView('tag', { tagId: id, title: `#${name}` })
+      }
     }
     setEditingTag(null)
   }
@@ -135,7 +168,7 @@ export function SettingsModal(): React.JSX.Element {
               <div className="set-row"><span className="set-label">选择伙伴</span><div className="pet-skin-options">{(['cat', 'bunny'] as const).map(skin => <button key={skin} aria-pressed={pet.skin === skin} className={pet.skin === skin ? 'active' : ''} onClick={() => changePet({ skin })}><Mascot skin={skin}/><span>{skin === 'cat' ? '奶油猫咪' : '草莓兔兔'}</span></button>)}</div></div>
               <label className="set-row"><span className="set-label">显示大小</span><select className="set-select" value={pet.scale} onChange={e => changePet({ scale: Number(e.target.value) })}><option value="0.85">小巧 · 85%</option><option value="1">标准 · 100%</option><option value="1.15">大号 · 115%</option></select></label>
               <label className="set-row"><span className="set-label">不透明度</span><select className="set-select" value={pet.opacity} onChange={e => changePet({ opacity: Number(e.target.value) })}>{[1, .9, .8, .65, .5].map(v => <option key={v} value={v}>{Math.round(v * 100)}%</option>)}</select></label>
-              <div className="set-row"><span className="set-label">桌面位置</span><button className="mini-btn" onClick={async () => { await window.api.pet.reset(); showToast('桌面伙伴已回到右下角') }}><RotateCcw size={12}/> 回到右下角</button><span className="set-hint">拖动伙伴可调整位置</span></div>
+              <div className="set-row"><span className="set-label">桌面位置</span><button className="mini-btn" disabled={!pet.enabled} title={!pet.enabled ? '请先开启桌宠' : '把伙伴移回屏幕右下角'} onClick={async () => { const ok = await window.api.pet.reset(); showToast(ok ? '桌面伙伴已回到右下角' : '请先开启桌宠') }}><RotateCcw size={12}/> 回到右下角</button><span className="set-hint">拖动伙伴可调整位置</span></div>
             </fieldset>
             <div className="pet-settings-note">默认只显示小宠物，鼠标移入展开今天和逾期任务，移开后收起。列表仅用滚轮滚动；拖动宠物调整位置，右键打开菜单。</div>
           </section>
@@ -218,6 +251,9 @@ export function SettingsModal(): React.JSX.Element {
                       await window.api.tags.remove(t.id)
                       await refreshSidebar()
                       await refresh()
+                      if (view.type === 'tag' && view.tagId === t.id) {
+                        await setView('all', { title: '全部' })
+                      }
                       showToast('标签已删除')
                     }}
                   >
@@ -340,9 +376,16 @@ export function SettingsModal(): React.JSX.Element {
                 type="checkbox"
                 checked={login}
                 onChange={async (e) => {
-                  const v = await window.api.data.setLoginItem(e.target.checked)
+                  const wanted = e.target.checked
+                  const v = await window.api.data.setLoginItem(wanted)
                   setLogin(v)
-                  showToast(v ? '已开启开机自启' : '已关闭开机自启')
+                  showToast(
+                    v === wanted
+                      ? v
+                        ? '已开启开机自启'
+                        : '已关闭开机自启'
+                      : '开机自启设置未生效，请检查系统权限'
+                  )
                 }}
               />
               <span className="set-hint">启动后静默驻留托盘</span>

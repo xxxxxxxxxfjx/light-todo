@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { PetSettings } from '../shared/pet'
 import type {
   CreateTaskInput,
+  List,
   UpdateTaskInput,
   ViewKey
 } from '../shared/types'
@@ -10,7 +11,7 @@ const api = {
   pet: {
     settings: (): Promise<PetSettings> => ipcRenderer.invoke('pet:settings'),
     setSettings: (patch: Partial<PetSettings>): Promise<PetSettings> => ipcRenderer.invoke('pet:setSettings', patch),
-    reset: (): Promise<void> => ipcRenderer.invoke('pet:reset'),
+    reset: (): Promise<boolean> => ipcRenderer.invoke('pet:reset'),
     onSettings: (cb: (settings: PetSettings) => void) => {
       const listener = (_e: unknown, settings: PetSettings): void => cb(settings)
       ipcRenderer.on('pet:settings', listener)
@@ -51,11 +52,14 @@ const api = {
   lists: {
     create: (input: { name: string; color?: string; icon?: string; folderId?: string | null }) =>
       ipcRenderer.invoke('lists:create', input),
-    update: (id: string, patch: Record<string, unknown>) => ipcRenderer.invoke('lists:update', id, patch),
+    update: (id: string, patch: Partial<Pick<List, 'name' | 'color' | 'icon' | 'folderId' | 'isPinned'>>) =>
+      ipcRenderer.invoke('lists:update', id, patch),
     remove: (id: string) => ipcRenderer.invoke('lists:delete', id)
   },
   folders: {
-    create: (name: string) => ipcRenderer.invoke('folders:create', name)
+    create: (name: string) => ipcRenderer.invoke('folders:create', name),
+    update: (id: string, patch: { name: string }) => ipcRenderer.invoke('folders:update', id, patch),
+    remove: (id: string) => ipcRenderer.invoke('folders:delete', id)
   },
   tags: {
     create: (name: string, color?: string) => ipcRenderer.invoke('tags:create', name, color),

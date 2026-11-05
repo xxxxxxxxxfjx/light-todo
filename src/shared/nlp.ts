@@ -4,7 +4,6 @@ import {
   addYears,
   endOfMonth,
   format,
-  setDate,
   startOfDay,
   startOfMonth
 } from 'date-fns'
@@ -19,6 +18,8 @@ export interface ParsedQuickAdd {
   priority: number
   listName: string | null
   tagNames: string[]
+  /** True when the text contains an explicit date (“明天”, “3月5日”, …). */
+  hasExplicitDate: boolean
 }
 
 const CN_DIGITS: Record<string, number> = {
@@ -154,7 +155,7 @@ export function parseQuickAdd(input: string, now: Date = new Date()): ParsedQuic
 
   // 每月 N 号
   if (!rrule) {
-    m = take(/每(?:个)?月(\d{1,2}|[一二三四五六七八九十]{1,3})[号日]/)
+    m = take(/每(?:个)?月(\d{1,2}|[一二三四五六七八九十两]{1,3})[号日]/)
     if (m) {
       repeatMonthDay = cnToNumber(m[1])
       rrule = `FREQ=MONTHLY;BYMONTHDAY=${repeatMonthDay}`
@@ -163,7 +164,7 @@ export function parseQuickAdd(input: string, now: Date = new Date()): ParsedQuic
 
   // 每 N 天/周/月/年
   if (!rrule) {
-    m = take(/每(\d{1,3}|[一二三四五六七八九十]{1,3})(天|日|周|星期|个月|月|年)/)
+    m = take(/每(\d{1,3}|[一二三四五六七八九十两]{1,3})个?(天|日|周|星期|个月|月|年)/)
     if (m) {
       const n = Math.max(1, cnToNumber(m[1]))
       const unit = m[2]
@@ -195,7 +196,6 @@ export function parseQuickAdd(input: string, now: Date = new Date()): ParsedQuic
   const today = startOfDay(now)
   let dateOnly: Date | null = null
   let forcedHour: number | null = null
-
   if ((m = take(/(今晚|今夜)/))) {
     dateOnly = today
     forcedHour = 20
@@ -249,6 +249,9 @@ export function parseQuickAdd(input: string, now: Date = new Date()): ParsedQuic
     if (d.getTime() < today.getTime()) d = addYears(d, 1)
     dateOnly = d
   }
+  // Only the explicit date keywords above count as a user-chosen date; a
+  // time-only expression ("9:00") must not override a calendar pick.
+  const hasExplicitDate = dateOnly !== null
 
   // ── time ──────────────────────────────────────────────
   let hour: number | null = null
@@ -289,8 +292,27 @@ export function parseQuickAdd(input: string, now: Date = new Date()): ParsedQuic
     dateOnly = addDays(today, min)
   }
   if (!dateOnly && repeatMonthDay) {
-    const d = setDate(today, repeatMonthDay)
-    dateOnly = d.getTime() < today.getTime() ? addMonths(d, 1) : d
+    // setDate() would roll 31 Nov into 1 Dec; find the next month that really
+    // has the requested day.
+    let year = today.getFullYear()
+    let month = today.getMonth()
+    const daysInMonth = (y: number, m: number): number => new Date(y, m + 1, 0).getDate()
+    for (let i = 0; i < 48; i++) {
+      const candidate = new Date(year, month, repeatMonthDay)
+      if (
+        repeatMonthDay <= daysInMonth(year, month) &&
+        candidate.getMonth() === month &&
+        candidate.getTime() >= today.getTime()
+      ) {
+        dateOnly = candidate
+        break
+      }
+      month++
+      if (month > 11) {
+        month = 0
+        year++
+      }
+    }
   }
   if (!dateOnly && repeatNthWeekday) {
     dateOnly = nextNthWeekday(today, repeatNthWeekday.nth, repeatNthWeekday.wd)
@@ -330,6 +352,7 @@ export function parseQuickAdd(input: string, now: Date = new Date()): ParsedQuic
     repeatFrom: rrule ? 'due' : null,
     priority,
     listName,
-    tagNames
+    tagNames,
+    hasExplicitDate
   }
 }

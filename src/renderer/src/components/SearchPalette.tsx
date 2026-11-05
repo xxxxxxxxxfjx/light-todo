@@ -9,7 +9,9 @@ export function SearchPalette(): React.JSX.Element {
   const [q, setQ] = useState('')
   const [results, setResults] = useState<Task[]>([])
   const [active, setActive] = useState(0)
+  const [searching, setSearching] = useState(false)
   const ref = useRef<HTMLInputElement>(null)
+  const resultsRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     ref.current?.focus()
@@ -17,19 +19,36 @@ export function SearchPalette(): React.JSX.Element {
 
   useEffect(() => {
     let cancelled = false
-    if (!q.trim()) {
+    const term = q.trim()
+    if (!term) {
       setResults([])
+      setSearching(false)
       return
     }
+    // Drop stale rows immediately; Enter must never open a previous query's task.
+    setResults([])
+    setActive(0)
+    setSearching(true)
     const t = setTimeout(() => {
-      window.api.search.query(q).then((r) => {
-        if (cancelled) return
-        setResults(r)
-        setActive(0)
-      })
+      window.api.search
+        .query(term)
+        .then((r) => {
+          if (cancelled) return
+          setResults(r)
+          setActive(0)
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false)
+        })
     }, 140)
     return () => { cancelled = true; clearTimeout(t) }
   }, [q])
+
+  useEffect(() => {
+    resultsRef.current
+      ?.querySelector<HTMLElement>(`[data-index="${active}"]`)
+      ?.scrollIntoView({ block: 'nearest' })
+  }, [active])
 
   const open = async (task: Task): Promise<void> => {
     await selectTaskById(task.id)
@@ -56,15 +75,19 @@ export function SearchPalette(): React.JSX.Element {
                 e.preventDefault()
                 setActive((a) => Math.max(a - 1, 0))
               }
-              if (e.key === 'Enter' && results[active]) open(results[active])
+              if (e.key === 'Enter' && !searching && results[active]) open(results[active])
             }}
           />
           <kbd>Esc</kbd>
         </div>
-        <div className="search-results">
+        <div className="search-results" ref={resultsRef}>
           {q.trim() === '' && <div className="search-hint">输入关键词，搜索标题、备注和标签</div>}
-          {q.trim() !== '' && results.length === 0 && (
+          {q.trim() !== '' && searching && <div className="search-hint">搜索中…</div>}
+          {q.trim() !== '' && !searching && results.length === 0 && (
             <div className="search-hint">没有找到匹配的任务</div>
+          )}
+          {!searching && results.length >= 60 && (
+            <div className="search-hint">结果较多，仅显示前 60 条，请输入更具体的关键词</div>
           )}
           {results.map((t, i) => {
             const due = dueLabel(t)
@@ -72,6 +95,7 @@ export function SearchPalette(): React.JSX.Element {
             return (
               <button
                 key={t.id}
+                data-index={i}
                 className={`search-row ${i === active ? 'active' : ''}`}
                 onMouseEnter={() => setActive(i)}
                 onClick={() => open(t)}

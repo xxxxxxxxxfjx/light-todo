@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Calendar,
   CalendarDays,
@@ -31,8 +31,32 @@ export function Sidebar(): React.JSX.Element {
   const [creating, setCreating] = useState<'list' | 'folder' | null>(null)
   const [draft, setDraft] = useState('')
   const [menuListId, setMenuListId] = useState<string | null>(null)
+  const [menuFolderId, setMenuFolderId] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null)
+  const [folderDraft, setFolderDraft] = useState('')
+
+  useEffect(() => {
+    if (!menuListId && !menuFolderId) return
+    const closeOnOutside = (event: PointerEvent): void => {
+      if (event.target instanceof Element && event.target.closest('.list-row,.sb-folder-row')) return
+      setMenuListId(null)
+      setMenuFolderId(null)
+    }
+    const closeOnEsc = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setMenuListId(null)
+        setMenuFolderId(null)
+      }
+    }
+    document.addEventListener('pointerdown', closeOnOutside)
+    document.addEventListener('keydown', closeOnEsc)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutside)
+      document.removeEventListener('keydown', closeOnEsc)
+    }
+  }, [menuListId, menuFolderId])
 
   const submit = async (): Promise<void> => {
     const name = draft.trim()
@@ -78,6 +102,37 @@ export function Sidebar(): React.JSX.Element {
       setView('all', { title: '全部' })
     }
     showToast('清单已删除')
+  }
+
+  const startFolderRename = (id: string, name: string): void => {
+    setRenamingFolderId(id)
+    setFolderDraft(name)
+    setMenuFolderId(null)
+  }
+
+  const commitFolderRename = async (): Promise<void> => {
+    const name = folderDraft.trim()
+    if (renamingFolderId && name) {
+      await window.api.folders.update(renamingFolderId, { name })
+      await refreshSidebar()
+      showToast('文件夹已重命名')
+    }
+    setRenamingFolderId(null)
+  }
+
+  const removeFolder = async (id: string, name: string): Promise<void> => {
+    if (!window.confirm(`删除文件夹「${name}」？其中的清单会移到根目录，任务不会删除。`)) return
+    await window.api.folders.remove(id)
+    setMenuFolderId(null)
+    await refreshSidebar()
+    showToast('文件夹已删除')
+  }
+
+  const moveList = async (listId: string, folderId: string): Promise<void> => {
+    await window.api.lists.update(listId, { folderId: folderId || null })
+    setMenuListId(null)
+    await refreshSidebar()
+    showToast(folderId ? '已移动到文件夹' : '已移到根目录')
   }
 
   const groups = [
@@ -133,7 +188,47 @@ export function Sidebar(): React.JSX.Element {
 
         {groups.map((g) => (
           <div key={g.id ?? 'root'} className="sb-group">
-            {g.name && <div className="sb-folder">{g.name}</div>}
+            {g.name && (
+              <div className="sb-folder-row">
+                {renamingFolderId === g.id ? (
+                  <input
+                    className="inline-input"
+                    autoFocus
+                    value={folderDraft}
+                    onChange={(e) => setFolderDraft(e.target.value)}
+                    onBlur={commitFolderRename}
+                    onKeyDown={(e) => {
+                      if (e.nativeEvent.isComposing || e.keyCode === 229) return
+                      if (e.key === 'Enter') commitFolderRename()
+                      if (e.key === 'Escape') setRenamingFolderId(null)
+                    }}
+                  />
+                ) : (
+                  <div className="sb-folder">{g.name}</div>
+                )}
+                <button
+                  className="folder-more"
+                  title="文件夹选项"
+                  aria-label={`文件夹选项：${g.name}`}
+                  onClick={() => {
+                    setMenuListId(null)
+                    setMenuFolderId(menuFolderId === g.id ? null : g.id)
+                  }}
+                >
+                  <MoreHorizontal size={12} />
+                </button>
+                {menuFolderId === g.id && (
+                  <div className="list-actions folder-actions">
+                    <button onClick={() => startFolderRename(g.id!, g.name)}>
+                      <Pencil size={12} /> 重命名
+                    </button>
+                    <button className="danger" onClick={() => removeFolder(g.id!, g.name)}>
+                      <Trash2 size={12} /> 删除
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             {g.lists.map((l) => (
               <div key={l.id} className="list-row">
                 {renamingId === l.id ? (
@@ -155,7 +250,10 @@ export function Sidebar(): React.JSX.Element {
                       className={`nav-item list-item ${
                         view.type === 'list' && view.listId === l.id ? 'active' : ''
                       }`}
-                      onClick={() => setView('list', { listId: l.id, title: l.name })}
+                      onClick={() => {
+                        setMenuListId(null)
+                        setView('list', { listId: l.id, title: l.name })
+                      }}
                       onContextMenu={(e) => {
                         e.preventDefault()
                         setMenuListId(menuListId === l.id ? null : l.id)
@@ -175,6 +273,7 @@ export function Sidebar(): React.JSX.Element {
                       title="更多"
                       onClick={(e) => {
                         e.stopPropagation()
+                        setMenuFolderId(null)
                         setMenuListId(menuListId === l.id ? null : l.id)
                       }}
                     >
@@ -188,6 +287,21 @@ export function Sidebar(): React.JSX.Element {
                         <button className="danger" onClick={() => removeList(l.id, l.name)}>
                           <Trash2 size={12} /> 删除
                         </button>
+                        <label className="list-folder-pick">
+                          <span>文件夹</span>
+                          <select
+                            value={l.folderId ?? ''}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => moveList(l.id, e.target.value)}
+                          >
+                            <option value="">未分组</option>
+                            {sidebar.folders.map((f) => (
+                              <option key={f.id} value={f.id}>
+                                {f.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
                       </div>
                     )}
                   </>

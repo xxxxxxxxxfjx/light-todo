@@ -67,7 +67,10 @@ export function CalendarView(): React.JSX.Element {
     const map = new Map<string, Task[]>()
     for (const t of tasks) {
       if (!showDone && t.status === 1) continue
-      const key = t.scheduledDate ?? (t.dueAt ? format(new Date(t.dueAt), 'yyyy-MM-dd') : null)
+      const dueDate = t.dueAt ? new Date(t.dueAt) : null
+      const key =
+        t.scheduledDate ??
+        (dueDate && !Number.isNaN(dueDate.getTime()) ? format(dueDate, 'yyyy-MM-dd') : null)
       if (!key) continue
       if (!map.has(key)) map.set(key, [])
       map.get(key)!.push(t)
@@ -114,6 +117,9 @@ export function CalendarView(): React.JSX.Element {
   const choose = (key: string): void => {
     setDate(key)
     selectTask(null)
+    if (mode === 'month' && key.slice(0, 7) !== visibleMonthKey) {
+      ensureMonthVisible(key.slice(0, 7))
+    }
   }
 
   const jumpToDate = (key: string): void => {
@@ -233,6 +239,7 @@ export function CalendarView(): React.JSX.Element {
     monthScrollFrame.current = requestAnimationFrame(() => {
       monthScrollFrame.current = 0
       const blocks = Array.from(el.querySelectorAll<HTMLElement>('[data-month-block]'))
+      let topKey: string | undefined
       if (blocks.length) {
         const viewTop = el.scrollTop
         const viewBottom = viewTop + el.clientHeight
@@ -246,9 +253,12 @@ export function CalendarView(): React.JSX.Element {
           }
         }
         const key = current.dataset.monthBlock
+        topKey = key
         if (key) setVisibleMonthKey((prev) => prev === key ? prev : key)
       }
       if (monthScrollLock.current) return
+      // Keep the agenda's selected day inside the month the user is looking at.
+      if (topKey && date.slice(0, 7) !== topKey) setDate(`${topKey}-01`)
       if (el.scrollTop < 80) prependMonth()
       else if (el.scrollHeight - el.scrollTop - el.clientHeight < 140) appendMonth()
     })
@@ -313,11 +323,14 @@ export function CalendarView(): React.JSX.Element {
     return <div key={key} role="gridcell" aria-selected={key === date} aria-label={`${key}，${list.length}项任务`} tabIndex={key === date ? 0 : -1} data-date={key} className={`cal-cell ${isSameMonth(d,monthDate) ? '' : 'dim'} ${isToday(d) ? 'today' : ''} ${key === date ? 'selected-day' : ''}`} onClick={() => choose(key)} onDoubleClick={() => openQuickAdd('',key)} onDragOver={e => e.preventDefault()} onDrop={async e => {e.preventDefault(); const id=e.dataTransfer.getData('text/lighttodo-task'); if(id && tasks.some(t => t.id === id)) {choose(key); await updateTask(id,{scheduledDate:key})}}}>
       <div className="cal-date"><span>{d.getDate()}</span></div>
       <div className="cal-items">
-        {list.slice(0, visible).map(t => <button key={t.id} draggable onDragStart={e => e.dataTransfer.setData('text/lighttodo-task',t.id)} className={`cal-item ${t.status === 1 ? 'done' : ''} ${selected?.id === t.id ? 'active' : ''}`} data-p={t.priority} style={{'--task-color': colorOf(t)} as React.CSSProperties} onClick={e => {e.stopPropagation(); setDate(key); selectTask(t.id)}} onDoubleClick={e => e.stopPropagation()} title={`${t.dueAt && !t.dueAllDay ? format(new Date(t.dueAt),'HH:mm') + ' ' : ''}${t.title}`}>
+        {list.slice(0, visible).map(t => {
+          const dueTime = t.dueAt ? new Date(t.dueAt) : null
+          const showTime = !!dueTime && !Number.isNaN(dueTime.getTime()) && !t.dueAllDay
+          return <button key={t.id} draggable onDragStart={e => e.dataTransfer.setData('text/lighttodo-task',t.id)} className={`cal-item ${t.status === 1 ? 'done' : ''} ${selected?.id === t.id ? 'active' : ''}`} data-p={t.priority} style={{'--task-color': colorOf(t)} as React.CSSProperties} onClick={e => {e.stopPropagation(); setDate(key); selectTask(t.id)}} onDoubleClick={e => e.stopPropagation()} title={`${showTime ? format(dueTime!,'HH:mm') + ' ' : ''}${t.title}`}>
           <i className="cal-dot" style={{background: colorOf(t)}}/>
           <span className="cal-title">{t.title}</span>
-          {t.dueAt && !t.dueAllDay && <time>{format(new Date(t.dueAt),'HH:mm')}</time>}
-        </button>)}
+          {showTime && <time>{format(dueTime!,'HH:mm')}</time>}
+        </button>})}
       </div>
       {list.length > visible && <span className="cal-more" title="点击日期在下方查看全部">还有 {list.length - visible} 项…</span>}
     </div>
@@ -326,7 +339,11 @@ export function CalendarView(): React.JSX.Element {
   const taskRow = (t: Task): React.JSX.Element => {
     const list = sidebar.lists.find(l => l.id === t.listId)
     const color = list?.color ?? 'var(--accent)'
-    const when = t.dueAt && !t.dueAllDay ? format(new Date(t.dueAt),'HH:mm') : '全天'
+    const dueTime = t.dueAt ? new Date(t.dueAt) : null
+    const when =
+      dueTime && !Number.isNaN(dueTime.getTime()) && !t.dueAllDay
+        ? format(dueTime, 'HH:mm')
+        : '全天'
     const meta = [list?.name, ...t.tags.map(x => x.name)].filter(Boolean).join(' · ')
     return <div key={t.id} className={`agenda-row ${t.status === 1 ? 'done' : ''} ${selected?.id === t.id ? 'active' : ''}`}>
       <button className={`check ${t.status === 1 ? 'checked' : ''}`} aria-label={t.status === 1 ? '撤销完成' : '完成任务'} onClick={() => toggleTask(t.id)}><Check size={12}/></button>

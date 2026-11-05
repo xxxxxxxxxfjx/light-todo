@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { CalendarDays, Clock, Flag, Hash, Moon, Repeat, Tag, X } from 'lucide-react'
 import { parseQuickAdd } from '@shared/nlp'
 import { addDays, format } from 'date-fns'
-import { dateLabel } from '../lib/format'
+import { dateLabel, parseLocalDate } from '../lib/format'
+import { repeatLabel } from '../lib/repeat'
 import { useStore } from '../store'
 
 function Chip({
@@ -37,16 +38,49 @@ export function QuickAdd(): React.JSX.Element {
   const [text, setText] = useState(quickAddInitial)
   const ref = useRef<HTMLTextAreaElement>(null)
   const parsed = useMemo(() => parseQuickAdd(text), [text])
+  // The calendar's picked day is the anchor: a time-only phrase such as “9:00”
+  // must not silently move the task to today/tomorrow. An explicit date in the
+  // text ("明天", "3月5日") still wins.
+  const effective = useMemo(() => {
+    if (!quickAddDate || parsed.hasExplicitDate) {
+      return { scheduledDate: parsed.scheduledDate, dueAt: parsed.dueAt }
+    }
+    let dueAt = parsed.dueAt
+    if (dueAt) {
+      const base = parseLocalDate(quickAddDate)
+      const time = new Date(dueAt)
+      base.setHours(time.getHours(), time.getMinutes(), 0, 0)
+      dueAt = base.toISOString()
+    }
+    return { scheduledDate: quickAddDate, dueAt }
+  }, [parsed, quickAddDate])
   const previewSomeday =
-    view.type === 'someday' && !parsed.scheduledDate && !parsed.dueAt && !quickAddDate
+    view.type === 'someday' && !effective.scheduledDate && !effective.dueAt && !quickAddDate
 
   useEffect(() => {
     ref.current?.focus()
   }, [])
 
   const submit = async (keepOpen = false): Promise<void> => {
+    const trimmed = text.trim()
     const title = parsed.title.trim()
+    const metadataOnly =
+      !!title &&
+      title === trimmed &&
+      !!(
+        parsed.scheduledDate ||
+        parsed.dueAt ||
+        parsed.priority ||
+        parsed.listName ||
+        parsed.tagNames.length ||
+        parsed.rrule
+      )
     if (!title || savingRef.current) return
+    if (metadataOnly) {
+      showToast('请输入任务标题')
+      ref.current?.focus()
+      return
+    }
     savingRef.current = true
     setSaving(true)
     try {
@@ -74,23 +108,24 @@ export function QuickAdd(): React.JSX.Element {
     }
 
     // 日期默认：日历点选的那天 > NLP 解析 > 当前视图约定
-    let scheduledDate = parsed.scheduledDate ?? quickAddDate
-    if (!scheduledDate && !parsed.dueAt && view.type !== 'someday') {
+    let scheduledDate = effective.scheduledDate
+    const dueAt = effective.dueAt
+    if (!scheduledDate && !dueAt && view.type !== 'someday') {
       scheduledDate =
         view.type === 'upcoming'
           ? format(addDays(new Date(), 1), 'yyyy-MM-dd')
           : format(new Date(), 'yyyy-MM-dd')
     }
     const isSomeday =
-      view.type === 'someday' && !scheduledDate && !parsed.dueAt
+      view.type === 'someday' && !scheduledDate && !dueAt
 
     await createTask({
       title,
       listId,
       someday: isSomeday,
       scheduledDate,
-      dueAt: parsed.dueAt,
-      dueAllDay: parsed.dueAllDay,
+      dueAt,
+      dueAllDay: dueAt ? 0 : parsed.dueAllDay,
       rrule: parsed.rrule,
       repeatFrom: parsed.repeatFrom,
       priority: parsed.priority,
@@ -103,7 +138,7 @@ export function QuickAdd(): React.JSX.Element {
         : parsed.listName || view.type === 'list'
           ? `已添加到${parsed.listName ?? view.title}`
           : scheduledDate
-            ? `已添加到 ${dateLabel(scheduledDate)}`
+            ? `已添加到${dateLabel(scheduledDate)}`
             : '已添加'
     )
     if (keepOpen) {
@@ -151,10 +186,10 @@ export function QuickAdd(): React.JSX.Element {
             {previewSomeday && (
               <Chip icon={Moon}>也许</Chip>
             )}
-            {(parsed.scheduledDate || quickAddDate) && (
-              <Chip icon={CalendarDays}>{dateLabel(parsed.scheduledDate ?? quickAddDate!)}</Chip>
+            {effective.scheduledDate && (
+              <Chip icon={CalendarDays}>{dateLabel(effective.scheduledDate)}</Chip>
             )}
-            {parsed.dueAt && <Chip icon={Clock}>{format(new Date(parsed.dueAt), 'HH:mm')}</Chip>}
+            {effective.dueAt && <Chip icon={Clock}>{format(new Date(effective.dueAt), 'HH:mm')}</Chip>}
             {parsed.rrule && <Chip icon={Repeat}>{repeatLabel(parsed.rrule)}</Chip>}
             {parsed.priority > 0 && (
               <Chip icon={Flag}>{['', '低', '中', '高'][parsed.priority]}优先级</Chip>
@@ -186,13 +221,4 @@ export function QuickAdd(): React.JSX.Element {
       </div>
     </div>
   )
-}
-
-function repeatLabel(rrule: string): string {
-  if (rrule.includes('BYDAY=MO,TU,WE,TH,FR')) return '工作日'
-  if (rrule.includes('FREQ=DAILY')) return '每天'
-  if (rrule.includes('FREQ=WEEKLY')) return '每周'
-  if (rrule.includes('FREQ=MONTHLY')) return '每月'
-  if (rrule.includes('FREQ=YEARLY')) return '每年'
-  return '重复'
 }

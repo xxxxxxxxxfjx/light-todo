@@ -29,7 +29,8 @@ export function DetailPanel(): React.JSX.Element {
     selectTask,
     toggleTask,
     refresh,
-    refreshSidebar
+    refreshSidebar,
+    showToast
   } = useStore()
   const [title, setTitle] = useState('')
   const [notes, setNotes] = useState('')
@@ -42,6 +43,7 @@ export function DetailPanel(): React.JSX.Element {
     setTitle(selected?.title ?? '')
     setNotes(selected?.notes ?? '')
     setTagText((selected?.tags ?? []).map((t) => t.name).join(' '))
+    setSubDraft('')
   }, [selected?.id])
 
   if (!selected) return <Overview />
@@ -49,7 +51,13 @@ export function DetailPanel(): React.JSX.Element {
   const task = selected
 
   const saveTitle = (): void => {
-    if (title.trim() && title !== task.title) updateTask(task.id, { title: title.trim() })
+    const value = title.trim()
+    if (!value) {
+      setTitle(task.title)
+      showToast('任务标题不能为空')
+      return
+    }
+    if (value !== task.title) updateTask(task.id, { title: value })
   }
   const saveNotes = (): void => {
     // 以 DOM 实际值为准，避免输入法/程序化输入导致 state 未同步时丢备注
@@ -61,7 +69,14 @@ export function DetailPanel(): React.JSX.Element {
       .split(/[\s,，]+/)
       .map((s) => s.replace(/^#/, '').trim())
       .filter(Boolean)
-    updateTask(task.id, { tagNames: names })
+    const unchanged =
+      names.length === task.tags.length && names.every((n) => task.tags.some((t) => t.name === n))
+    if (!unchanged) updateTask(task.id, { tagNames: names })
+  }
+
+  const refreshIfStillSelected = async (): Promise<void> => {
+    await Promise.all([refresh(), refreshSidebar()])
+    if (useStore.getState().selected?.id === task.id) await selectTask(task.id)
   }
 
   const addSubtask = async (): Promise<void> => {
@@ -69,11 +84,9 @@ export function DetailPanel(): React.JSX.Element {
     if (!t || addingSubtask.current) return
     addingSubtask.current = true
     try {
-    await window.api.tasks.create({ title: t, parentId: task.id })
-    setSubDraft('')
-    await selectTask(task.id)
-    await refresh()
-    await refreshSidebar()
+      await window.api.tasks.create({ title: t, parentId: task.id })
+      setSubDraft('')
+      await refreshIfStillSelected()
     } catch (error) { useStore.getState().showToast(`添加子任务失败：${String(error)}`) }
     finally { addingSubtask.current = false }
   }
@@ -138,13 +151,24 @@ export function DetailPanel(): React.JSX.Element {
             <input
               type="datetime-local"
               value={isoToLocalInput(task.dueAt)}
-              onChange={(e) => updateTask(task.id, { dueAt: localInputToIso(e.target.value) })}
+              onChange={(e) =>
+                updateTask(task.id, {
+                  dueAt: localInputToIso(e.target.value),
+                  dueAllDay: 0
+                })
+              }
             />
           </Field>
 
           <Field label="提醒">
             <select
               value={task.reminderOffset === null ? '' : String(task.reminderOffset)}
+              disabled={!task.scheduledDate && !task.dueAt}
+              title={
+                !task.scheduledDate && !task.dueAt
+                  ? '请先设置计划日或截止时间'
+                  : '提醒会在设定时间弹出系统通知'
+              }
               onChange={(e) =>
                 updateTask(task.id, {
                   reminderOffset: e.target.value === '' ? null : Number(e.target.value)
@@ -250,9 +274,7 @@ export function DetailPanel(): React.JSX.Element {
                   className={`check small ${s.status === 1 ? 'checked' : ''}`}
                   onClick={async () => {
                     await window.api.tasks.setStatus(s.id, s.status !== 1)
-                    await selectTask(task.id)
-                    await refresh()
-                    await refreshSidebar()
+                    await refreshIfStillSelected()
                   }}
                 >
                   <span className="check-dot" />

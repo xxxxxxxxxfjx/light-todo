@@ -33,6 +33,7 @@ interface AppStore {
   quickAddDate: string | null
   selectMode: boolean
   selectedIds: string[]
+  batchBusy: boolean
   searchOpen: boolean
   settingsOpen: boolean
   toast: string
@@ -93,6 +94,7 @@ export const useStore = create<AppStore>((set, get) => ({
   quickAddDate: null,
   selectMode: false,
   selectedIds: [],
+  batchBusy: false,
   searchOpen: false,
   settingsOpen: false,
   toast: '',
@@ -115,7 +117,7 @@ export const useStore = create<AppStore>((set, get) => ({
         tag: '标签'
       } as Record<ViewKey, string>)[type]
     selectionId++
-    set({ view: { type, ...opts, title }, tasks: [], selected: null, filter: 'all', selectedIds: [], selectMode: false, sidebarOpen: false })
+    set({ view: { type, ...opts, title }, tasks: [], selected: null, filter: 'all', selectedIds: [], selectMode: false, batchBusy: false, sidebarOpen: false })
     await get().refresh()
   },
 
@@ -238,41 +240,65 @@ export const useStore = create<AppStore>((set, get) => ({
   clearSelection: () => set({ selectedIds: [], selectMode: false }),
 
   batchComplete: async () => {
+    if (get().batchBusy) return
     const ids = get().selectedIds.filter(id => get().tasks.some(t => t.id === id && matchFilter(t, get().filter)))
     if (!ids.length) return
-    for (const id of ids) await window.api.tasks.setStatus(id, true)
-    set({ selectedIds: [], selectMode: false })
-    await Promise.all([get().refresh(), get().refreshSidebar()])
-    get().showToast(`已完成 ${ids.length} 项`)
+    set({ batchBusy: true })
+    try {
+      await Promise.all(ids.map((id) => window.api.tasks.setStatus(id, true)))
+      set({ selectedIds: [], selectMode: false })
+      await Promise.all([get().refresh(), get().refreshSidebar()])
+      get().showToast(`已完成 ${ids.length} 项`)
+    } finally {
+      set({ batchBusy: false })
+    }
   },
 
   batchDelete: async () => {
+    if (get().batchBusy) return
     const ids = get().selectedIds.filter(id => get().tasks.some(t => t.id === id && matchFilter(t, get().filter)))
     if (!ids.length) return
-    for (const id of ids) await window.api.tasks.remove(id)
-    if (get().selected && ids.includes(get().selected!.id)) set({ selected: null })
-    set({ selectedIds: [], selectMode: false })
-    await Promise.all([get().refresh(), get().refreshSidebar()])
-    get().showToast(`已删除 ${ids.length} 项`)
+    set({ batchBusy: true })
+    try {
+      await Promise.all(ids.map((id) => window.api.tasks.remove(id)))
+      if (get().selected && ids.includes(get().selected!.id)) set({ selected: null })
+      set({ selectedIds: [], selectMode: false })
+      await Promise.all([get().refresh(), get().refreshSidebar()])
+      get().showToast(`已移到回收站 ${ids.length} 项`)
+    } finally {
+      set({ batchBusy: false })
+    }
   },
 
   batchRestore: async () => {
+    if (get().batchBusy) return
     const ids = get().selectedIds.filter(id => get().tasks.some(t => t.id === id && matchFilter(t, get().filter)))
     if (!ids.length) return
-    for (const id of ids) await window.api.tasks.restore(id)
-    set({ selectedIds: [], selectMode: false })
-    await Promise.all([get().refresh(), get().refreshSidebar()])
-    get().showToast(`已恢复 ${ids.length} 项`)
+    set({ batchBusy: true })
+    try {
+      await Promise.all(ids.map((id) => window.api.tasks.restore(id)))
+      set({ selectedIds: [], selectMode: false })
+      await Promise.all([get().refresh(), get().refreshSidebar()])
+      get().showToast(`已恢复 ${ids.length} 项`)
+    } finally {
+      set({ batchBusy: false })
+    }
   },
 
   batchPurge: async () => {
+    if (get().batchBusy) return
     const ids = get().selectedIds.filter(id => get().tasks.some(t => t.id === id && matchFilter(t, get().filter)))
     if (!ids.length) return
-    for (const id of ids) await window.api.tasks.purge(id)
-    if (get().selected && ids.includes(get().selected!.id)) set({ selected: null })
-    set({ selectedIds: [], selectMode: false })
-    await Promise.all([get().refresh(), get().refreshSidebar()])
-    get().showToast(`已彻底删除 ${ids.length} 项`)
+    set({ batchBusy: true })
+    try {
+      await Promise.all(ids.map((id) => window.api.tasks.purge(id)))
+      if (get().selected && ids.includes(get().selected!.id)) set({ selected: null })
+      set({ selectedIds: [], selectMode: false })
+      await Promise.all([get().refresh(), get().refreshSidebar()])
+      get().showToast(`已彻底删除 ${ids.length} 项`)
+    } finally {
+      set({ batchBusy: false })
+    }
   },
 
   openQuickAdd: (text = '', date) =>
@@ -280,7 +306,8 @@ export const useStore = create<AppStore>((set, get) => ({
       quickAddOpen: true,
       quickAddInitial: text,
       quickAddDate: date ?? null,
-      searchOpen: false
+      searchOpen: false,
+      settingsOpen: false
     }),
   closeQuickAdd: () => set({ quickAddOpen: false, quickAddInitial: '', quickAddDate: null }),
   openSearch: () => set({ searchOpen: true, quickAddOpen: false, settingsOpen: false }),

@@ -463,7 +463,10 @@ await runScenario(
     { js: clickText('.nav-item', '日历'), wait: 800 },
     {
       js: `(() => {
-        const cell = [...document.querySelectorAll('.cal-cell')].find((c) => !c.classList.contains('dim') && c.querySelector('.cal-date > span')?.textContent === '15');
+        const now = new Date();
+        const monthKey = \`\${now.getFullYear()}-\${String(now.getMonth() + 1).padStart(2, '0')}\`;
+        const block = document.querySelector(\`[data-month-block="\${monthKey}"]\`);
+        const cell = [...(block?.querySelectorAll('.cal-cell') ?? [])].find((c) => c.querySelector('.cal-date > span')?.textContent === '15');
         if (!cell) return 'NO_CELL';
         cell.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
         return 'CLICKED';
@@ -515,6 +518,7 @@ await runScenario(
     { js: clickText('.task-row', '批量A'), wait: 200 },
     { js: clickText('.task-row', '批量B'), wait: 200 },
     { js: `document.querySelector('.bulk-bar')?.textContent ?? ''`, wait: 100 },
+    { js: `(() => { window.confirm = () => true; return 'OK' })()`, wait: 50 },
     { js: `[...document.querySelectorAll('.bulk-bar .mini-btn')].find((b) => b.textContent.trim() === '删除')?.click()`, wait: 1000 }
   ],
   ({ out, db }) => {
@@ -530,6 +534,7 @@ await runScenario(
   'settings-tags',
   [
     { js: `document.querySelector('.sb-foot .nav-item').click()`, wait: 600 },
+    { js: clickText('.settings-tabs button', '标签管理'), wait: 400 },
     { js: setText('.tag-add input', '旅行', 'input'), wait: 300 },
     { js: clickText('.tag-add .mini-btn', '添加'), wait: 1100 },
     { js: `[...document.querySelectorAll('.tag-manage-row')].map((e) => e.textContent)`, wait: 100 },
@@ -781,7 +786,7 @@ await runScenario(
     { js: clickText('.nav-item', '已完成'), wait: 700 },
     { js: clickText('.head-actions .ghost-btn', '多选'), wait: 300 },
     { js: `document.querySelector('.bulk-bar .mini-btn')?.click()`, wait: 300 },
-    { js: `[...document.querySelectorAll('.bulk-bar .mini-btn')].find((b) => b.textContent.trim() === '删除')?.click()`, wait: 900 },
+    { js: `(() => { window.confirm = () => true; [...document.querySelectorAll('.bulk-bar .mini-btn')].find((b) => b.textContent.trim() === '删除')?.click(); return 'OK' })()`, wait: 900 },
     { js: `document.querySelectorAll('.task-row').length`, wait: 100 },
     { js: clickText('.nav-item', '回收站'), wait: 700 },
     { js: clickText('.head-actions .ghost-btn', '多选'), wait: 300 },

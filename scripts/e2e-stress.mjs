@@ -110,7 +110,7 @@ const steps = [
       [...document.querySelectorAll('.nav-item')].find((e) => e.textContent.includes('日历'))?.click();
       const iv = setInterval(() => {
         const n = document.querySelectorAll('.cal-cell').length;
-        if (n === 42) { clearInterval(iv); resolve({ ms: Math.round(performance.now() - t0), cells: n, items: document.querySelectorAll('.cal-item').length }); }
+        if (n >= 42) { clearInterval(iv); resolve({ ms: Math.round(performance.now() - t0), cells: n, items: document.querySelectorAll('.cal-item').length }); }
       }, 20);
       setTimeout(() => { clearInterval(iv); resolve({ ms: -1, cells: 0 }); }, 8000);
     })`,

@@ -1575,6 +1575,7 @@ kbd {
   top: 100%;
   z-index: 20;
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   padding: 4px;
   background: var(--surface);
@@ -1600,6 +1601,58 @@ kbd {
 }
 .list-actions button.danger {
   color: var(--danger);
+}
+.list-folder-pick {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 1px;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+.list-folder-pick select {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 11px;
+}
+.sb-folder-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.sb-folder-row .sb-folder {
+  flex: 1;
+  min-width: 0;
+}
+.folder-more {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: none;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-3);
+}
+.sb-folder-row:hover .folder-more,
+.folder-more:focus-visible {
+  display: grid;
+}
+.folder-more:hover {
+  background: var(--hover);
+  color: var(--text-2);
+}
+.folder-actions {
+  left: 8px;
+  right: 8px;
 }
 
 /* ── trash ─────────────────────────────────────────────── */

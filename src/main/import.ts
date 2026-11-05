@@ -20,6 +20,7 @@ interface TaskDraft {
   done?: boolean
   tagNames?: string[]
   parentTitle?: string | null
+  subtaskTitles?: string[]
 }
 
 function parseCsv(text: string): string[][] {
@@ -112,6 +113,7 @@ function ticktick(rows: string[][]): TaskDraft[] {
     if (!title) continue
     const tagsRaw = (r[idx.tags] ?? '').trim()
     const doneRaw = (r[idx.status] ?? '').trim()
+    const subRaw = (r[idx.sub] ?? '').trim()
     out.push({
       title,
       listName: (r[idx.list] ?? '').trim() || null,
@@ -120,7 +122,8 @@ function ticktick(rows: string[][]): TaskDraft[] {
       scheduledDate: toDate(r[idx.due]),
       dueAt: toDateTime(r[idx.due]),
       notes: r[idx.notes] ?? '',
-      done: /^(1|是|已完成|完成|true)$/i.test(doneRaw)
+      done: /^(1|是|已完成|完成|true)$/i.test(doneRaw),
+      subtaskTitles: subRaw ? subRaw.split(/[\n\r;；|]+/).map((s) => s.trim()).filter(Boolean) : []
     })
   }
   return out
@@ -185,21 +188,31 @@ function performImport(content: string, filename: string): ImportResult {
         const folder = getFolders().find(x => x.name === f.name) ?? createFolder(f.name)
         folderIds.set(f.id, folder.id)
       }
+      // Preserve exported list identity, including two lists that share a name.
       const listIdByName = new Map<string, string>()
       const listIds = new Map<string, string>()
       for (const l of getLists()) listIdByName.set(l.name, l.id)
-      for (const l of data.lists ?? []) {
-        if (!listIdByName.has(l.name)) {
-          const created = createList({
-            name: l.name,
-            color: l.color ?? undefined,
-            icon: l.icon ?? undefined,
-            folderId: l.folderId ? folderIds.get(l.folderId) ?? null : null
-          })
-          listIdByName.set(l.name, created.id)
-          result.lists++
+      const exportedLists = data.lists ?? []
+      for (const l of exportedLists) {
+        let targetId = l.id ? listIds.get(l.id) : undefined
+        if (!targetId) {
+          const sameName = exportedLists.filter((x) => x.name === l.name)
+          const existing = getLists().find((x) => x.name === l.name)
+          const alreadyMapped = sameName.some((x) => x.id && listIds.has(x.id))
+          if (sameName.length === 1 && existing && !alreadyMapped) {
+            targetId = existing.id
+          } else {
+            targetId = createList({
+              name: l.name,
+              color: l.color ?? undefined,
+              icon: l.icon ?? undefined,
+              folderId: l.folderId ? folderIds.get(l.folderId) ?? null : null
+            }).id
+            result.lists++
+          }
         }
-        if (l.id) listIds.set(l.id, listIdByName.get(l.name)!)
+        if (l.id) listIds.set(l.id, targetId)
+        listIdByName.set(l.name, targetId)
       }
       for (const tag of data.tags ?? []) createTag(tag.name, tag.color ?? undefined)
       const taskIds = new Map<string, string>()
@@ -276,6 +289,10 @@ function performImport(content: string, filename: string): ImportResult {
         tagNames: d.tagNames ?? []
       })
       taskIdByTitle.set(d.title, created.id)
+      for (const subTitle of d.subtaskTitles ?? []) {
+        createTask({ title: subTitle, parentId: created.id })
+        result.tasks++
+      }
       if (d.done) setTaskStatus(created.id, true)
       result.tasks++
     }
@@ -291,7 +308,8 @@ export function importFromText(content: string, filename: string): ImportResult 
   try {
     return transaction(() => performImport(content, filename))
   } catch (e) {
-    return { ok: false, lists: 0, tasks: 0, tags: 0, errors: [String(e)], message: String(e) }
+    const message = e instanceof Error ? e.message : String(e)
+    return { ok: false, lists: 0, tasks: 0, tags: 0, errors: [message], message }
   }
 }
 

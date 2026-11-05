@@ -16,7 +16,7 @@
     "dist": "node scripts/package-windows.cjs",
     "dist:setup": "electron-vite build && electron-builder --win nsis",
     "dist:zip": "electron-vite build && electron-builder --win dir",
-    "test:unit": "node --experimental-strip-types scripts/test-nlp.ts && node --experimental-strip-types scripts/test-db.ts && node --experimental-strip-types scripts/test-import.ts && node --experimental-strip-types scripts/test-recurrence.ts && node --experimental-strip-types scripts/test-qa-regressions.ts && node scripts/qa-store-review.mjs && node --experimental-strip-types scripts/test-week-layout.ts && node --experimental-strip-types scripts/test-calendar-range.ts",
+    "test:unit": "node --experimental-strip-types scripts/test-nlp.ts && node --experimental-strip-types scripts/test-db.ts && node --experimental-strip-types scripts/test-import.ts && node --experimental-strip-types scripts/test-recurrence.ts && node --experimental-strip-types scripts/test-qa-regressions.ts && node --experimental-strip-types scripts/test-bugfix-regressions.ts && node scripts/qa-store-review.mjs && node --experimental-strip-types scripts/test-week-layout.ts && node --experimental-strip-types scripts/test-calendar-range.ts",
     "test:e2e": "node scripts/e2e.mjs",
     "test:flows": "node scripts/e2e-flows.mjs",
     "test:stress": "node --experimental-strip-types scripts/e2e-stress.mjs",

@@ -12,7 +12,8 @@ export function registerIpc(): void {
   ipcMain.handle('app:info', () => ({
     version: app.getVersion(),
     dataDir: db.getDataDir(),
-    platform: process.platform
+    platform: process.platform,
+    theme: db.getSetting('ui_theme') ?? 'system'
   }))
   ipcMain.handle('app:openDataDir', async () => {
     await shell.openPath(db.getDataDir())
@@ -41,6 +42,10 @@ export function registerIpc(): void {
   ipcMain.handle('lists:delete', (e, id: string) => mutate(e.sender.id, () => db.deleteList(id)))
 
   ipcMain.handle('folders:create', (_e, name: string) => db.createFolder(name))
+  ipcMain.handle('folders:update', (_e, id: string, patch: { name: string }) =>
+    db.updateFolder(id, patch.name)
+  )
+  ipcMain.handle('folders:delete', (e, id: string) => mutate(e.sender.id, () => db.deleteFolder(id)))
 
   ipcMain.handle('tags:create', (_e, name: string, color?: string) => db.createTag(name, color))
   ipcMain.handle('tags:update', (_e, id: string, patch: { name?: string; color?: string | null }) =>

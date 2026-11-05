@@ -66,6 +66,9 @@ function Pet(): React.JSX.Element {
     const moved = drag.current.moved
     drag.current = null
     window.petApi.drag('end')
+    // Main restored click-through on drag end. The cursor is still over the
+    // pet, so make the window interactive again until the next leave.
+    window.petApi.interactive(true)
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     if (!moved) show()
   }

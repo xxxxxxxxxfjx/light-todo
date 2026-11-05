@@ -11,8 +11,9 @@ import {
 } from 'node:fs'
 import { basename, join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { checkpoint, clearCompleted, closeDb, getAllData, getDataDir } from './db'
+import { checkpoint, clearCompleted, closeDb, getAllData, getDataDir, initDb } from './db'
 import { importFromText } from './import'
+import { buildMarkdown } from './markdown'
 import { notifyTaskWindows } from './pet'
 
 function stamp(): string {
@@ -66,35 +67,7 @@ function backupList(): { name: string; size: number; time: number }[] {
 }
 
 function markdown(): string {
-  const data = getAllData()
-  const lines: string[] = [`# 轻单导出 ${new Date().toLocaleString('zh-CN')}`, '']
-  const byList = new Map<string, typeof data.tasks>()
-  for (const t of data.tasks) {
-    if (t.parentId) continue
-    const key = t.listId ?? ''
-    if (!byList.has(key)) byList.set(key, [])
-    byList.get(key)!.push(t)
-  }
-  const listName = (id: string): string => data.lists.find((l) => l.id === id)?.name ?? '未分类'
-  for (const [listId, tasks] of byList) {
-    lines.push(`## ${listId ? listName(listId) : '未分类'}`, '')
-    for (const t of tasks) {
-      const done = t.status === 1 ? 'x' : ' '
-      const bits: string[] = []
-      if (t.scheduledDate) bits.push(`计划 ${t.scheduledDate}`)
-      if (t.dueAt) bits.push(`截止 ${new Date(t.dueAt).toLocaleString('zh-CN')}`)
-      if (t.priority === 3) bits.push('!高')
-      else if (t.priority === 2) bits.push('!中')
-      else if (t.priority === 1) bits.push('!低')
-      if (t.tags.length) bits.push(t.tags.map((x) => `#${x.name}`).join(' '))
-      lines.push(`- [${done}] ${t.title}${bits.length ? `  _(${bits.join(' · ')})_` : ''}`)
-      for (const sub of t.subtasks ?? []) {
-        lines.push(`  - [${sub.status === 1 ? 'x' : ' '}] ${sub.title}`)
-      }
-    }
-    lines.push('')
-  }
-  return lines.join('\n')
+  return buildMarkdown(getAllData())
 }
 
 export function registerDataIpc(): void {
@@ -105,23 +78,47 @@ export function registerDataIpc(): void {
   ipcMain.handle('data:backups', () => backupList())
   ipcMain.handle('data:clearCompleted', () => clearCompleted())
   ipcMain.handle('data:restoreBackup', (_e, name: string) => {
+    const dataDir = getDataDir()
+    let closed = false
+    const tmp = join(dataDir, 'lighttodo.db.restore-tmp')
     try {
       const safe = basename(name)
-      const src = join(getDataDir(), 'backups', safe)
+      const src = join(dataDir, 'backups', safe)
       if (!existsSync(src)) return { ok: false, message: '备份文件不存在' }
+      if (statSync(src).size === 0) return { ok: false, message: '备份文件为空或已损坏' }
+      // Copy to a staging file first so an unreadable backup never closes the
+      // live database or leaves the app in a half-restored state.
+      copyFileSync(src, tmp)
+      const launcher = join(process.execPath, '..', 'LightTodo.exe')
+      backupNow('pre-restore')
       closeDb()
-      const dest = join(getDataDir(), 'lighttodo.db')
-      copyFileSync(src, dest)
+      closed = true
+      const dest = join(dataDir, 'lighttodo.db')
+      copyFileSync(tmp, dest)
       for (const suffix of ['-wal', '-shm']) {
         const p = dest + suffix
         if (existsSync(p)) unlinkSync(p)
       }
-      const launcher = join(process.execPath, '..', 'LightTodo.exe')
+      initDb(dataDir)
+      closed = false
       app.relaunch({ execPath: app.isPackaged && existsSync(launcher) ? launcher : process.execPath })
       app.exit(0)
       return { ok: true }
     } catch (e) {
+      if (closed) {
+        try {
+          initDb(dataDir)
+        } catch {
+          /* reported below */
+        }
+      }
       return { ok: false, message: String(e) }
+    } finally {
+      try {
+        if (existsSync(tmp)) unlinkSync(tmp)
+      } catch {
+        /* best effort */
+      }
     }
   })
   ipcMain.handle('data:exportJson', async () => {

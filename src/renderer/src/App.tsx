@@ -38,10 +38,21 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('lighttodo.theme')
-    if (savedTheme && savedTheme !== 'system') {
+    if (savedTheme === 'light' || savedTheme === 'dark') {
       document.documentElement.dataset.theme = savedTheme
+      window.api.app.setTheme(savedTheme)
+    } else if (savedTheme === 'system') {
+      delete document.documentElement.dataset.theme
+      window.api.app.setTheme('system')
+    } else {
+      // No local preference yet (fresh profile / restored backup): use the
+      // theme persisted in SQLite instead of overwriting it with "system".
+      window.api.app.info().then((info) => {
+        if (info.theme === 'light' || info.theme === 'dark') {
+          document.documentElement.dataset.theme = info.theme
+        }
+      })
     }
-    window.api.app.setTheme(savedTheme === 'light' || savedTheme === 'dark' ? savedTheme : 'system')
     refreshSidebar()
     refresh()
     const dv = localStorage.getItem('lighttodo.defaultView')
@@ -76,11 +87,21 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
       if (e.isComposing || e.keyCode === 229) return
-      const target = e.target as HTMLElement
+      const target = e.target instanceof HTMLElement ? e.target : document.body
       const typing =
         target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
+      const control = !!target.closest(
+        'input,textarea,select,button,a,[contenteditable="true"],[role="switch"],[role="checkbox"],[role="combobox"]'
+      )
       const mod = e.ctrlKey || e.metaKey
 
+      if (settingsOpen) {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          closeSettings()
+        }
+        return
+      }
       if (mod && e.key.toLowerCase() === 'f') {
         e.preventDefault()
         openSearch()
@@ -97,7 +118,7 @@ export default function App(): React.JSX.Element {
         closeSettings()
         return
       }
-      if (typing || quickAddOpen || searchOpen || settingsOpen) return
+      if (typing || quickAddOpen || searchOpen || control) return
 
       if (mod && /^[1-6]$/.test(e.key)) {
         e.preventDefault()
@@ -113,24 +134,36 @@ export default function App(): React.JSX.Element {
         if (item) setView(item.key, { title: item.title })
         return
       }
-      if (e.key === ' ' && selected) {
+      const taskLike =
+        target === document.body ||
+        target === document.documentElement ||
+        !!target.closest('.task-row,.agenda-row,.week-task')
+      if (e.key === ' ' && selected && taskLike) {
         e.preventDefault()
         toggleTask(selected.id)
         return
       }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selected && taskLike) {
         e.preventDefault()
         deleteTask(selected.id)
         return
       }
       if (mod && e.shiftKey && e.key.toLowerCase() === 't' && selected) {
         e.preventDefault()
+        if (selected.status === 1) {
+          showToast('已完成的任务请先恢复再安排')
+          return
+        }
         updateTask(selected.id, { scheduledDate: format(new Date(), 'yyyy-MM-dd') })
         showToast('已安排到今天')
         return
       }
       if (mod && e.shiftKey && e.key.toLowerCase() === 'm' && selected) {
         e.preventDefault()
+        if (selected.status === 1) {
+          showToast('已完成的任务请先恢复再安排')
+          return
+        }
         updateTask(selected.id, {
           scheduledDate: format(addDays(new Date(), 1), 'yyyy-MM-dd')
         })
