@@ -37,7 +37,7 @@ async function killTest(target){
  const blocked=path.join(base,'blocked-log');fs.writeFileSync(blocked,'not a directory');const env=cleanEnv();env.LIGHTTODO_DATA_DIR=blocked;
  await run(env);console.log('PASS 日志不可写仍可正常启动');
  const before=fs.readFileSync(path.join(base,'runtime-calls.txt'),'utf8').trim().split('\n').length;
- await run(cleanEnv(),['--retry-test'],0x80000003);const calls=fs.readFileSync(path.join(base,'runtime-calls.txt'),'utf8').trim().split('\n');assert.equal(calls.length,before+1);assert.equal(calls.at(-1),'run:--retry-test');console.log('PASS 异常退出只启动一次，不做兼容重试');
+ await run(cleanEnv(),['--retry-test'],0x80000003);const calls=fs.readFileSync(path.join(base,'runtime-calls.txt'),'utf8').trim().split('\n');assert.equal(calls.length,before+2);assert.equal(calls.at(-1),'run:--retry-test|--no-sandbox|--disable-gpu');console.log('PASS Chromium 初始化失败只兼容重试一次');
  const outer=path.join(base,'outer');fs.mkdirSync(outer);const inherited=cleanEnv();inherited.PORTABLE_EXECUTABLE_DIR=outer;await run(inherited);assert.ok(fs.existsSync(path.join(outer,'LightTodoData','launcher.log')));console.log('PASS 子启动器沿用外层便携目录');
  await killTest('launcher');await killTest('runtime');
  console.log('Launcher lifecycle tests passed:',base);

@@ -32,11 +32,19 @@ internal static class LightTodoLauncher {
             if (payload == null) return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "LightTodoRuntime.exe");
             string root = AppDomain.CurrentDomain.BaseDirectory;
             string target = Path.Combine(root, "LightTodoApp-" + AppVersion + "-" + payloadName.Split('.')[2]);
-            string entryPoint = Path.Combine(target, "LightTodo.exe");
-            if (!File.Exists(Path.Combine(target, ".complete"))) {
-                // Extract beside the portable exe, avoiding restricted Windows temporary directories.
-                string staging = Path.Combine(root, ".LightTodo-extract-" + Guid.NewGuid().ToString("N"));
-                Directory.CreateDirectory(staging);
+            string entryPoint = Path.Combine(target, "LightTodoRuntime.exe");
+            // Serialize first launch and repair. Extract directly: Windows can deny
+            // renaming a freshly extracted directory while scanners hold its files.
+            Directory.CreateDirectory(target);
+            FileStream extractionLock = null;
+            for (int attempt = 0; extractionLock == null; attempt++) {
+                try { extractionLock = new FileStream(target + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+                catch (IOException) { if (attempt >= 300) throw; System.Threading.Thread.Sleep(100); }
+            }
+            using (extractionLock) {
+            if (!File.Exists(Path.Combine(target, ".complete")) || !File.Exists(entryPoint) || !File.Exists(Path.Combine(target, "resources", "app.asar"))) {
+                File.Delete(Path.Combine(target, ".complete"));
+                string staging = target;
                 using (var zip = new ZipArchive(payload, ZipArchiveMode.Read)) {
                     foreach (var entry in zip.Entries) {
                         string destination = Path.GetFullPath(Path.Combine(staging, entry.FullName));
@@ -47,8 +55,7 @@ internal static class LightTodoLauncher {
                     }
                 }
                 File.WriteAllText(Path.Combine(staging, ".complete"), AppVersion);
-                if (!Directory.Exists(target)) Directory.Move(staging, target);
-                else throw new IOException("程序目录不完整，请将 " + Path.GetFileName(target) + " 文件夹重命名后重试。");
+            }
             }
             return entryPoint;
         }
@@ -73,6 +80,7 @@ internal static class LightTodoLauncher {
             environment.Remove("ELECTRON_RUN_AS_NODE");
             environment.Remove("NODE_OPTIONS");
             environment["PORTABLE_EXECUTABLE_DIR"] = PortableRoot;
+            environment["PORTABLE_EXECUTABLE_FILE"] = Environment.GetEnvironmentVariable("PORTABLE_EXECUTABLE_FILE") ?? Assembly.GetExecutingAssembly().Location;
             var block = new StringBuilder();
             foreach (var entry in environment) block.Append(entry.Key).Append('=').Append(entry.Value).Append('\0');
             block.Append('\0');
@@ -170,6 +178,7 @@ internal static class LightTodoLauncher {
             }
             return code;
         } catch (Exception error) {
+            TryLog(error.ToString());
             MessageBox.Show(error.Message + "\n日志：" + log, "轻单启动失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
         }

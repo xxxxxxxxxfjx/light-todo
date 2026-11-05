@@ -1,6 +1,6 @@
 {
   "name": "lighttodo",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "private": true,
   "description": "轻单 LightTodo — Windows 上最快的中文待办",
   "main": "./out/main/index.js",
@@ -22,7 +22,7 @@
     "test:stress": "node --experimental-strip-types scripts/e2e-stress.mjs",
     "test": "pnpm test:unit && pnpm test:e2e && pnpm test:flows && pnpm test:stress",
     "test:calendar": "node scripts/e2e-calendar.mjs",
-    "test:launcher": "node scripts/test-launcher.cjs",
+    "test:launcher": "node scripts/test-launcher.cjs && node scripts/test-launcher-payload.cjs",
     "app:cdp": "node scripts/app-cdp.mjs",
     "test:layout": "node scripts/e2e-layout-theme.mjs"
   },

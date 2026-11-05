@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeTheme, screen } from 'electron'
 import { join } from 'node:path'
-import { createTask, getSetting, setSetting, listTasks, setTaskStatus } from './db'
+import { createTask, getSetting, setSetting, listTasks, setTaskStatus, getTask, updateTask, deleteTask } from './db'
 import { parseQuickAdd } from '../shared/nlp'
 import {
   DEFAULT_ISLAND_SETTINGS,
@@ -29,6 +29,8 @@ let interactive = false
 let hoverTimer: ReturnType<typeof setTimeout> | undefined
 let leaveTimer: ReturnType<typeof setTimeout> | undefined
 let drag: { startX: number; winX: number } | null = null
+let editing = false
+let transitionUntil = 0
 let openMain: (id?: string, settings?: boolean) => void = () => {}
 let onTasksChanged: () => void = () => {}
 
@@ -86,8 +88,12 @@ export function islandState(): IslandState {
     tasks.push(...page)
     if (page.length < 500) break
   }
-  const completedToday = listTasks({ view: 'completed', limit: 1000 })
-    .filter(t => (t.completedAt ?? '').startsWith(today))
+  const completedToday: Task[] = []
+  for (let offset = 0; ; offset += 500) {
+    const page = listTasks({ view: 'completed', offset, limit: 500 })
+    completedToday.push(...page.filter(t => t.completedAt && new Date(t.completedAt).toLocaleDateString('sv-SE') === today))
+    if (page.length < 500) break
+  }
   const done = completedToday.length
   const overdue = tasks.filter(t => isOverdue(t)).length
   const soon = tasks.filter(t => {
@@ -98,7 +104,7 @@ export function islandState(): IslandState {
   return {
     settings: getIslandSettings(),
     theme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
-    tasks: tasks.slice(0, 200),
+    tasks: [...tasks, ...completedToday],
     stats: { total: tasks.length + done, done, remaining: tasks.length, overdue, soon },
     next: nextOf(tasks)
   }
@@ -123,6 +129,7 @@ function capsuleRect(): { x: number; y: number; w: number; h: number } {
 function applyPhase(next: IslandPhase): void {
   if (phase === next) return
   phase = next
+  transitionUntil = Date.now() + 320
   if (island && !island.isDestroyed()) {
     island.webContents.send('island:phase-set', next)
     // 面板打开时允许键盘（Ctrl+N / Esc），收起后立刻还原“不抢焦点”
@@ -139,6 +146,7 @@ function applyPhase(next: IslandPhase): void {
  */
 function syncHit(): void {
   if (!island || island.isDestroyed()) return
+  if (drag || Date.now() < transitionUntil) return
   const point = screen.getCursorScreenPoint()
   const bounds = island.getBounds()
   const rect = capsuleRect()
@@ -161,7 +169,7 @@ function syncHit(): void {
     clearTimeout(hoverTimer)
     clearTimeout(leaveTimer)
     // 移开就收起（含 panel）：点别的窗口时岛会自然关闭
-    leaveTimer = setTimeout(() => applyPhase('rest'), HOVER_CLOSE_MS)
+    if (!editing) leaveTimer = setTimeout(() => applyPhase('rest'), HOVER_CLOSE_MS)
   }
 }
 
@@ -174,7 +182,7 @@ function place(): void {
   if (!island) return
   const display = screen.getPrimaryDisplay()
   const area = display.workArea
-  const saved = Number(getSetting('island_x') ?? '')
+  const saved = Number(getSetting('island_x') ?? 'NaN')
   const centered = area.x + (area.width - ISLAND_STAGE.width) / 2
   const x = Number.isFinite(saved)
     ? Math.max(area.x, Math.min(saved, area.x + area.width - ISLAND_STAGE.width))
@@ -261,12 +269,33 @@ export function registerIsland(showMain: (id?: string, settings?: boolean) => vo
   const assertIsland = (sender: Electron.WebContents): void => {
     if (stopping || sender !== island?.webContents) throw new Error('任务岛窗口已关闭')
   }
+  const assertToday = (id: string): Task => {
+    const task = islandState().tasks.find(t => t.id === id)
+    if (!task || !getTask(id)) throw new Error('任务已不在今天列表中，请刷新后重试')
+    return task
+  }
   ipcMain.handle('island:state', e => { assertIsland(e.sender); return islandState() })
   ipcMain.handle('island:settings', () => getIslandSettings())
   ipcMain.handle('island:setSettings', (_e, patch: Partial<IslandSettings>) => setIslandSettings(patch))
   ipcMain.handle('island:complete', (e, id: string) => {
     assertIsland(e.sender)
-    setTaskStatus(id, true)
+    const task = assertToday(id)
+    setTaskStatus(id, task.status !== 1)
+    notifyIsland()
+    onTasksChanged()
+  })
+  ipcMain.handle('island:update', (e, id: string, title: string) => {
+    assertIsland(e.sender)
+    assertToday(id)
+    if (typeof title !== 'string' || !title.trim()) throw new Error('标题不能为空')
+    updateTask(id, { title: title.trim() })
+    notifyIsland()
+    onTasksChanged()
+  })
+  ipcMain.handle('island:delete', (e, id: string) => {
+    assertIsland(e.sender)
+    assertToday(id)
+    deleteTask(id)
     notifyIsland()
     onTasksChanged()
   })
@@ -277,12 +306,10 @@ export function registerIsland(showMain: (id?: string, settings?: boolean) => vo
     const task = createTask({
       title: parsed.title,
       // 岛只服务“今天”：没写日期就落到今天
-      scheduledDate: parsed.scheduledDate ?? todayStr(),
-      dueAt: parsed.dueAt,
+      scheduledDate: todayStr(),
+      dueAt: parsed.dueAt ? (() => { const date = new Date(parsed.dueAt); const today = new Date(); today.setHours(date.getHours(), date.getMinutes(), 0, 0); return today.toISOString() })() : null,
       dueAllDay: parsed.dueAllDay,
       priority: parsed.priority,
-      rrule: parsed.rrule,
-      repeatFrom: parsed.repeatFrom,
       tagNames: parsed.tagNames,
       listId: null
     })
@@ -321,15 +348,22 @@ export function registerIsland(showMain: (id?: string, settings?: boolean) => vo
   // 快速添加时要能接收键盘：临时把窗口变成可聚焦，收起后再还原
   ipcMain.on('island:focusable', (e, focusable: boolean) => {
     if (stopping || e.sender !== island?.webContents || !island) return
-    island.setFocusable(focusable)
+    editing = focusable
+    if (editing) clearTimeout(leaveTimer)
+    else { interactive = true; syncHit() }
+    island.setFocusable(focusable || phase === 'panel')
     if (focusable) island.focus()
-    else island.blur()
+    else if (phase !== 'panel') island.blur()
+  })
+  ipcMain.on('island:quit', e => {
+    if (!stopping && e.sender === island?.webContents) app.quit()
   })
   ipcMain.on('island:menu', e => {
     if (stopping || e.sender !== island?.webContents || !island) return
     Menu.buildFromTemplate([
       { label: '打开轻单', click: () => openMain() },
       { label: '隐藏任务岛', click: toggleIsland },
+      { label: '恢复顶部居中', click: () => { setSetting('island_x', 'NaN'); place() } },
       { type: 'separator' },
       { label: '退出轻单', click: () => app.quit() }
     ]).popup({ window: island })

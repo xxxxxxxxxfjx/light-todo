@@ -26,7 +26,9 @@ import type { Task } from '../shared/types'
 
 const T0 = Date.now()
 const isDev = !app.isPackaged
-const launcherPath = app.isPackaged && existsSync(join(process.execPath, '..', 'LightTodo.exe'))
+const launcherPath = process.env.PORTABLE_EXECUTABLE_FILE && existsSync(process.env.PORTABLE_EXECUTABLE_FILE)
+  ? process.env.PORTABLE_EXECUTABLE_FILE
+  : app.isPackaged && existsSync(join(process.execPath, '..', 'LightTodo.exe'))
   ? join(process.execPath, '..', 'LightTodo.exe') : process.execPath
 
 // 便携版把数据放在 exe 同目录；开发环境放工作区；也可用环境变量显式指定。
@@ -143,7 +145,8 @@ function createWindow(): void {
   mainWindow.on('close', (e) => {
     if (!isQuitting) {
       e.preventDefault()
-      app.quit()
+      if (tray) mainWindow?.hide()
+      else app.quit()
     }
   })
   mainWindow.on('closed', () => {
@@ -577,7 +580,7 @@ if (ownsInstance) app.whenReady().then(() => {
     showMain()
     if (id) sendToRendererWhenReady('ui:open-task', id)
     if (settings) sendToRendererWhenReady('ui:settings')
-  }, () => notifyTaskWindows())
+  }, () => { notifyTaskWindows(); updateTaskbarBadge() })
   createTray()
   setTimeout(updateTaskbarBadge, 1200)
   registerShortcuts()

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { Check, Plus, SquareArrowOutUpRight } from 'lucide-react'
+import { Check, Plus, SquareArrowOutUpRight, Pencil, Trash2, X } from 'lucide-react'
 import { ISLAND_ACCENTS, type IslandState } from '../../../shared/island'
 import type { Task } from '../../../shared/types'
 import './island.css'
@@ -70,6 +70,10 @@ function Island(): React.JSX.Element | null {
   const [busy, setBusy] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
   const phaseRef = useRef<Phase>('rest')
   const inputRef = useRef<HTMLInputElement>(null)
   const dragRef = useRef<{ x: number; moved: boolean } | null>(null)
@@ -81,9 +85,19 @@ function Island(): React.JSX.Element | null {
     const key = (event: KeyboardEvent): void => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') {
         event.preventDefault()
+        setEditingId(null)
+        setDraft('')
         setAdding(true)
         setPhase('panel')
         window.islandApi.phase('panel')
+      }
+      if (event.key === 'Escape') {
+        if (savingRef.current) return
+        setAdding(false)
+        setDraft('')
+        setEditingId(null)
+        setPhase('rest')
+        window.islandApi.phase('rest')
       }
     }
     document.addEventListener('keydown', key)
@@ -112,16 +126,32 @@ function Island(): React.JSX.Element | null {
   const complete = async (id: string): Promise<void> => {
     if (busy) return
     setBusy(id)
-    try { await window.islandApi.complete(id) } finally { setBusy(null) }
+    try { setError(''); await window.islandApi.complete(id) }
+    catch (e) { setError(String(e)) } finally { setBusy(null) }
+  }
+
+  const remove = async (id: string): Promise<void> => {
+    if (busy) return
+    setBusy(id)
+    try { setError(''); await window.islandApi.delete(id) }
+    catch (e) { setError(String(e)) } finally { setBusy(null) }
   }
 
   const save = async (): Promise<void> => {
     const text = draft.trim()
-    if (!text) { setAdding(false); return }
-    await window.islandApi.quickAdd(text)
-    setDraft('')
-    setAdding(false)
-    window.islandApi.phase('panel')
+    if (!text || savingRef.current) return
+    savingRef.current = true
+    setSaving(true)
+    setError('')
+    try {
+      if (editingId) await window.islandApi.update(editingId, text)
+      else await window.islandApi.quickAdd(text)
+      setDraft('')
+      setAdding(false)
+      setEditingId(null)
+      window.islandApi.phase('panel')
+    } catch (e) { setError(String(e)) }
+    finally { savingRef.current = false; setSaving(false) }
   }
 
   const submit = (event: React.FormEvent): void => {
@@ -139,7 +169,6 @@ function Island(): React.JSX.Element | null {
   const accent = ISLAND_ACCENTS[state?.settings.accent ?? 'purple']
 
   if (!state) return null
-  if (stats && stats.total === 0) return null
 
   return <div className="stage" data-theme={state.theme}>
     <section
@@ -148,7 +177,7 @@ function Island(): React.JSX.Element | null {
       data-island-surface
       onClick={event => {
         if (suppressClick.current) { suppressClick.current = false; return }
-        if ((event.target as Element).closest('button, .capsule-body')) return
+        if ((event.target as Element).closest('button, .capsule-body') || adding) return
         const nextPhase: Phase = phaseRef.current === 'panel' ? 'rest' : 'panel'
         setPhase(nextPhase)
         window.islandApi.phase(nextPhase)
@@ -160,7 +189,7 @@ function Island(): React.JSX.Element | null {
       <header
         className="capsule-head"
         onPointerDown={event => {
-          if ((event.target as Element).closest('button')) return
+          if ((event.target as Element).closest('button') || adding) return
           dragRef.current = { x: event.screenX, moved: false }
           event.currentTarget.setPointerCapture(event.pointerId)
           window.islandApi.drag('start', event.screenX)
@@ -190,10 +219,10 @@ function Island(): React.JSX.Element | null {
         <span className="count">
           {stats?.done ?? 0}<i>/</i>{stats?.total ?? 0}
         </span>
-        {phase !== 'rest' && <span className="label">
+        <span className="label">
           {allDone ? <b className="cheer">今天全部完成</b>
             : next ? <>接下来：<b>{next.title}</b>{next.at && <em> · {next.at}</em>}</> : null}
-        </span>}
+        </span>
         {phase === 'peek' && next && !allDone && <button
           className="peek-check"
           aria-label={`完成：${next.title}`}
@@ -201,31 +230,35 @@ function Island(): React.JSX.Element | null {
           onClick={event => { event.stopPropagation(); void complete(next.id) }}
         ><Check size={13}/></button>}
         {phase === 'panel' && <>
-          <button className="icon-btn" aria-label="快速添加" title="快速添加"
-            onClick={event => { event.stopPropagation(); setAdding(true); setPhase('panel'); window.islandApi.phase('panel') }}>
+          <button className="icon-btn" aria-label="快速添加" title="新增今天的任务（Ctrl+N）"
+            onClick={event => { event.stopPropagation(); setEditingId(null); setDraft(''); setAdding(true); setPhase('panel'); window.islandApi.phase('panel') }}>
             <Plus size={14}/>
           </button>
+          <button className="icon-btn quit-btn" aria-label="退出轻单" title="完全退出轻单（包括托盘和任务岛）" onClick={() => window.islandApi.quit()}><X size={14}/></button>
           <button className="head-link" onClick={event => { event.stopPropagation(); window.islandApi.open() }}>
             <SquareArrowOutUpRight size={12}/><span>打开轻单</span>
           </button>
         </>}
       </header>
 
-      {phase === 'panel' && <div className="capsule-body" onClick={event => event.stopPropagation()}>
+      <div className="capsule-body" inert={phase !== 'panel'} aria-hidden={phase !== 'panel'} onClick={event => event.stopPropagation()}>
         {adding && <form className="quick-add" onSubmit={submit}>
           <input
             ref={inputRef}
             value={draft}
+            disabled={saving}
             onChange={event => setDraft(event.target.value)}
             onKeyDown={event => {
-              if (event.key === 'Escape') { setAdding(false); setDraft('') }
+              if (event.nativeEvent.isComposing || event.keyCode === 229) return
+              if (event.key === 'Escape') { event.stopPropagation(); if (!saving) { setAdding(false); setDraft(''); setEditingId(null) } }
               if (event.key === 'Enter') { event.preventDefault(); void save() }
             }}
-            placeholder="加一件事，回车保存（支持「明天下午3点 写周报」）"
-            aria-label="快速添加任务"
+            placeholder={editingId ? '修改任务标题，回车保存' : '新增今天的任务，如「下午3点 写周报」'}
+            aria-label={editingId ? '修改任务标题' : '快速添加任务'}
           />
-          <button type="submit" className="submit" disabled={!draft.trim()}>添加</button>
+          <button type="submit" className="submit" disabled={!draft.trim() || saving}>{saving ? '保存中' : editingId ? '保存' : '添加'}</button>
         </form>}
+        {error && <p className="island-error" role="alert">{error}</p>}
         <div className="task-scroll">
           {pending.length === 0 && <p className="empty">{allDone ? cheer : '今天没有待办'}</p>}
           {pending.map(task => {
@@ -239,16 +272,20 @@ function Island(): React.JSX.Element | null {
                 {task.title}
               </button>
               {timeLabel(task) && <span className="time">{timeLabel(task)}</span>}
+              <button className="row-action" aria-label={`编辑：${task.title}`} disabled={busy !== null || saving} onClick={() => { setEditingId(task.id); setDraft(task.title); setAdding(true) }}><Pencil size={12}/></button>
+              <button className="row-action" aria-label={`删除：${task.title}`} title="移入回收站" disabled={busy !== null || saving} onClick={() => void remove(task.id)}><Trash2 size={12}/></button>
             </div>
           })}
           {finished.length > 0 && <div className="done-label">已完成 {finished.length}</div>}
-          {finished.slice(0, 20).map(task => <div className="row finished" key={task.id}>
-            <span className="check done"><Check size={10}/></span>
+          {finished.map(task => <div className="row finished" key={task.id}>
+            <button className="check done" aria-label={`取消完成：${task.title}`} disabled={busy !== null} onClick={() => void complete(task.id)}><Check size={10}/></button>
             <span className="title">{task.title}</span>
+            <button className="row-action" aria-label={`编辑：${task.title}`} disabled={busy !== null || saving} onClick={() => { setEditingId(task.id); setDraft(task.title); setAdding(true) }}><Pencil size={12}/></button>
+            <button className="row-action" aria-label={`删除：${task.title}`} title="移入回收站" disabled={busy !== null || saving} onClick={() => void remove(task.id)}><Trash2 size={12}/></button>
           </div>)}
         </div>
-        <footer className="hint">移开或再点胶囊即收起 · 右键菜单</footer>
-      </div>}
+        <footer className="hint">Ctrl+N 新增今天 · Esc 收起 · 拖动顶部 · 删除可从回收站恢复</footer>
+      </div>
     </section>
   </div>
 }

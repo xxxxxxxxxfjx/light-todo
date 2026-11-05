@@ -28,6 +28,8 @@ pnpm test:unit   # 纯逻辑回归（NLP / DB / 导入 / 重复规则）
   - `LightTodo-<version>-portable.zip`（完整目录版）
 - 每次发布递增 `package.json` 的 patch 版本，避免覆盖上一版产物。
 - 交付时必须报告产物路径、文件大小和 `checksums.json`；打包失败则报告失败原因，不能静默跳过。
+- `pnpm dist` 内置类型、逻辑、启动器、旧 E2E 及真实单文件/ZIP 成品启动门槛；任何门槛失败都不能交付。`checksums.json` 只在全部成功后生成，已有校验清单的版本拒绝覆盖。不得为了出包跳过这些门槛。
+- 修改启动器必须通过 `pnpm test:launcher`（含嵌入 ZIP 首次/并发启动、解压中断和缺失运行时恢复）。不能只测试 `win-unpacked` 或开发 Electron 后宣称单文件 exe 可用。
 
 ## 环境注意
 
