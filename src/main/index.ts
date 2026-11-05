@@ -20,6 +20,7 @@ import { windowColors, type ThemePreference } from './window-theme'
 import { registerIpc } from './ipc'
 import { backupNow, registerDataIpc } from './data'
 import { registerPet, schedulePetCreation, stopPet, togglePet, notifyTaskWindows } from './pet'
+import { registerIsland, stopIsland, toggleIsland, notifyIsland } from './island'
 import { updateTaskbarBadge } from './badge'
 import type { Task } from '../shared/types'
 
@@ -100,8 +101,9 @@ function showMain(): void {
   }
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()
-  // Windows 会阻止后台进程抢前台：临时置顶再取消，确保窗口真的到最前
+  // 从任务岛/托盘唤起时，后台进程直接 focus 会被前台锁拒绝，steal 才能真的到最前
   mainWindow.setAlwaysOnTop(true)
+  app.focus({ steal: true })
   mainWindow.focus()
   mainWindow.moveTop()
   mainWindow.setAlwaysOnTop(false)
@@ -157,8 +159,9 @@ function createWindow(): void {
     log('Window ready')
     log(`COLD_START_MS ${coldStartMs}`)
     console.log('COLD_START_MS', coldStartMs)
-    // 主窗口可用后再安排桌宠，默认关闭时这里直接跳过；老用户约 8 秒后创建。
-    schedulePetCreation()
+    // 桌宠暂停：相关入口已注释，桌面信息统一由「任务岛」承载。
+    // schedulePetCreation()
+    notifyIsland()
     // 回收站 30 天清理放到首屏之后，避免挡住冷启动路径。
     setTimeout(() => {
       try {
@@ -329,7 +332,8 @@ function createTray(): void {
   const menu = Menu.buildFromTemplate([
     { label: '打开轻单', click: showMain },
     { label: '新建任务', accelerator: 'CommandOrControl+Shift+Space', click: quickAdd },
-    { label: '显示 / 隐藏桌面伙伴', click: togglePet },
+    { label: '显示 / 隐藏任务岛', click: toggleIsland },
+    // 桌宠暂停：{ label: '显示 / 隐藏桌面伙伴', click: togglePet },
     { type: 'separator' },
     {
       label: '退出',
@@ -563,11 +567,17 @@ if (ownsInstance) app.whenReady().then(() => {
   registerIpc()
   registerDataIpc()
   createWindow()
-  registerPet((id, settings) => {
+  // 桌宠暂停（代码保留，后续如需恢复把下面几行取消注释即可）
+  // registerPet((id, settings) => {
+  //   showMain()
+  //   if (id) sendToRendererWhenReady('ui:open-task', id)
+  //   if (settings) sendToRendererWhenReady('ui:settings')
+  // }, T0)
+  registerIsland((id, settings) => {
     showMain()
     if (id) sendToRendererWhenReady('ui:open-task', id)
     if (settings) sendToRendererWhenReady('ui:settings')
-  }, T0)
+  }, () => notifyTaskWindows())
   createTray()
   setTimeout(updateTaskbarBadge, 1200)
   registerShortcuts()
@@ -606,7 +616,8 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   isQuitting = true
-  stopPet()
+  // 桌宠暂停：stopPet()
+  stopIsland()
   globalShortcut.unregisterAll()
   backupNow('exit')
   closeDb()

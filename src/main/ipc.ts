@@ -1,8 +1,21 @@
 import { app, ipcMain, shell } from 'electron'
 import * as db from './db'
+import { syncIcsSubscription } from './calendar-sync'
 import type { CreateTaskInput, UpdateTaskInput } from '../shared/types'
 import { notifyTaskWindows } from './pet'
 import { updateTaskbarBadge } from './badge'
+
+function readText(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`${label}不能为空`)
+  return value.trim()
+}
+
+function readDateBoundary(value: unknown, label: string): string {
+  const raw = readText(value, label)
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? new Date(`${raw}T00:00:00`) : new Date(raw)
+  if (Number.isNaN(parsed.getTime())) throw new Error(`${label}格式无效`)
+  return raw
+}
 
 export function registerIpc(): void {
   const mutate = <T>(sender: number, action: () => T): T => {
@@ -62,6 +75,19 @@ export function registerIpc(): void {
   ipcMain.handle('tags:delete', (_e, id: string) => db.deleteTag(id))
 
   ipcMain.handle('search:query', (_e, q: string) => db.searchTasks(q))
+
+  ipcMain.handle('calendar:syncIcs', async (_e, url: unknown) => {
+    const cleanUrl = readText(url, '日历订阅地址')
+    if (cleanUrl.length > 2048) throw new Error('日历订阅地址过长')
+    return syncIcsSubscription(cleanUrl)
+  })
+  ipcMain.handle('calendar:getEvents', (_e, from: unknown, to: unknown) => {
+    const fromDate = readDateBoundary(from, '开始日期')
+    const toDate = readDateBoundary(to, '结束日期')
+    return db.getCalendarEvents(fromDate, toDate)
+  })
+  ipcMain.handle('calendar:getSubscription', () => db.getCalendarSubscription())
+  ipcMain.handle('calendar:clearIcs', () => db.clearCalendarSubscription())
 
   ipcMain.handle('settings:get', (_e, key: string) => db.getSetting(key))
   ipcMain.handle('settings:set', (_e, key: string, value: string) => db.setSetting(key, value))

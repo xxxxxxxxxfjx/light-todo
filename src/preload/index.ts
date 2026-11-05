@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { PetSettings } from '../shared/pet'
+import type { IslandSettings } from '../shared/island'
 import type {
   CreateTaskInput,
   List,
@@ -8,7 +9,44 @@ import type {
   WeeklyReviewData
 } from '../shared/types'
 
+export interface CalendarSubscriptionView {
+  id: number
+  url: string
+  name: string | null
+  lastSyncedAt: string | null
+  lastError: string | null
+  updatedAt: string
+}
+
+export interface CalendarEventView {
+  id: string
+  subscriptionId: string
+  uid: string | null
+  title: string
+  description: string | null
+  startAt: string
+  endAt: string | null
+  allDay: boolean
+  rrule: string | null
+  updatedAt: string
+}
+
+export interface CalendarSyncResultView {
+  url: string
+  count: number
+  name?: string
+}
+
 const api = {
+  island: {
+    settings: (): Promise<IslandSettings> => ipcRenderer.invoke('island:settings'),
+    setSettings: (patch: Partial<IslandSettings>): Promise<IslandSettings> => ipcRenderer.invoke('island:setSettings', patch),
+    onSettings: (cb: (settings: IslandSettings) => void) => {
+      const listener = (_e: unknown, settings: IslandSettings): void => cb(settings)
+      ipcRenderer.on('island:settings', listener)
+      return (): void => { ipcRenderer.removeListener('island:settings', listener) }
+    }
+  },
   pet: {
     settings: (): Promise<PetSettings> => ipcRenderer.invoke('pet:settings'),
     setSettings: (patch: Partial<PetSettings>): Promise<PetSettings> => ipcRenderer.invoke('pet:setSettings', patch),
@@ -40,6 +78,15 @@ const api = {
   },
   review: {
     get: (): Promise<WeeklyReviewData> => ipcRenderer.invoke('review:get')
+  },
+  calendar: {
+    syncIcs: (url: string): Promise<CalendarSyncResultView> =>
+      ipcRenderer.invoke('calendar:syncIcs', url),
+    getEvents: (from: string, to: string): Promise<CalendarEventView[]> =>
+      ipcRenderer.invoke('calendar:getEvents', from, to),
+    getSubscription: (): Promise<CalendarSubscriptionView | null> =>
+      ipcRenderer.invoke('calendar:getSubscription'),
+    clearIcs: (): Promise<void> => ipcRenderer.invoke('calendar:clearIcs')
   },
   tasks: {
     list: (opts: { view: ViewKey; listId?: string; tagId?: string; limit?: number; offset?: number; dateFrom?: string; dateTo?: string }) =>

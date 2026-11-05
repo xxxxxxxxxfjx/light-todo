@@ -102,7 +102,8 @@ function place(reset = false): void {
   const y = Math.max(area.y, Math.min(savedY ?? area.y + area.height - height - 16, area.y + area.height - height))
   pet.setBounds({ x: Math.round(x), y: Math.round(y), width, height })
   appliedScale = zoom
-  pet.setOpacity(settings.opacity)
+  // 透明窗口（transparent:true）不能调用 setOpacity：它会把 per-pixel alpha
+  // 切到 LWA_ALPHA 模式，导致整窗什么都画不出来。不透明度改由渲染层 CSS 控制。
 }
 
 function savePosition(): void {

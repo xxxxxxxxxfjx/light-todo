@@ -156,6 +156,32 @@ CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- 只读 ICS 订阅：单行配置（id=1）。外部日历只拉取到本地展示，绝不回写。
+CREATE TABLE IF NOT EXISTS calendar_subscription (
+  id             INTEGER PRIMARY KEY CHECK (id = 1),
+  url            TEXT NOT NULL,
+  name           TEXT,
+  last_synced_at TEXT,
+  last_error     TEXT,
+  updated_at     TEXT NOT NULL
+);
+
+-- 已同步的外部日程快照。每次同步按订阅整体替换，作为只读展示数据。
+CREATE TABLE IF NOT EXISTS calendar_events (
+  id              TEXT PRIMARY KEY,
+  subscription_id TEXT NOT NULL,
+  uid             TEXT,
+  title           TEXT NOT NULL,
+  description     TEXT,
+  start_at        TEXT NOT NULL,
+  end_at          TEXT,
+  all_day         INTEGER NOT NULL DEFAULT 0,
+  rrule           TEXT,
+  updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_calendar_events_range
+  ON calendar_events(subscription_id, start_at, end_at);
 `
 
 const TAGS_SUBQUERY = `(
@@ -1394,4 +1420,215 @@ export function setSetting(key: string, value: string): void {
   conn()
     .prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
     .run(key, value)
+}
+
+export interface CalendarSubscription {
+  id: number
+  url: string
+  name: string | null
+  lastSyncedAt: string | null
+  lastError: string | null
+  updatedAt: string
+}
+
+export interface CalendarEventInput {
+  uid?: string | null
+  title: string
+  description?: string | null
+  startAt: string
+  endAt?: string | null
+  allDay?: boolean
+  rrule?: string | null
+}
+
+export interface CalendarEvent {
+  id: string
+  subscriptionId: string
+  uid: string | null
+  title: string
+  description: string | null
+  startAt: string
+  endAt: string | null
+  allDay: boolean
+  rrule: string | null
+  updatedAt: string
+}
+
+interface CalendarSubscriptionRow {
+  id: number
+  url: string
+  name: string | null
+  last_synced_at: string | null
+  last_error: string | null
+  updated_at: string
+}
+
+interface CalendarEventRow {
+  id: string
+  subscription_id: string
+  uid: string | null
+  title: string
+  description: string | null
+  start_at: string
+  end_at: string | null
+  all_day: number
+  rrule: string | null
+  updated_at: string
+}
+
+function mapCalendarSubscription(row: CalendarSubscriptionRow): CalendarSubscription {
+  return {
+    id: row.id,
+    url: row.url,
+    name: row.name,
+    lastSyncedAt: row.last_synced_at,
+    lastError: row.last_error,
+    updatedAt: row.updated_at
+  }
+}
+
+function mapCalendarEvent(row: CalendarEventRow): CalendarEvent {
+  return {
+    id: row.id,
+    subscriptionId: row.subscription_id,
+    uid: row.uid,
+    title: row.title,
+    description: row.description,
+    startAt: row.start_at,
+    endAt: row.end_at,
+    allDay: row.all_day === 1,
+    rrule: row.rrule,
+    updatedAt: row.updated_at
+  }
+}
+
+export function getCalendarSubscription(): CalendarSubscription | null {
+  const row = conn()
+    .prepare('SELECT * FROM calendar_subscription WHERE id = 1')
+    .get() as CalendarSubscriptionRow | undefined
+  return row ? mapCalendarSubscription(row) : null
+}
+
+/**
+ * 保存/更新唯一的日历订阅地址。name 省略时保留已有名称；
+ * 同步状态（last_synced_at / last_error）由同步流程单独维护。
+ */
+export function saveCalendarSubscription(url: string, name?: string): CalendarSubscription {
+  const cleanUrl = url.trim()
+  if (!cleanUrl) throw new Error('日历订阅地址不能为空')
+  const cleanName = name?.trim() || null
+  const stamp = nowIso()
+  conn()
+    .prepare(
+      `INSERT INTO calendar_subscription (id, url, name, last_synced_at, last_error, updated_at)
+       VALUES (1, ?, ?, NULL, NULL, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         url = excluded.url,
+         name = COALESCE(excluded.name, calendar_subscription.name),
+         updated_at = excluded.updated_at`
+    )
+    .run(cleanUrl, cleanName, stamp)
+  return getCalendarSubscription()!
+}
+
+export function markCalendarSubscriptionSynced(at: string = nowIso()): void {
+  conn()
+    .prepare(
+      `UPDATE calendar_subscription
+       SET last_synced_at = ?, last_error = NULL, updated_at = ?
+       WHERE id = 1`
+    )
+    .run(at, at)
+}
+
+export function setCalendarSubscriptionError(message: string | null): void {
+  conn()
+    .prepare('UPDATE calendar_subscription SET last_error = ?, updated_at = ? WHERE id = 1')
+    .run(message, nowIso())
+}
+
+/**
+ * 同一订阅整体替换：事务内先删旧快照再插入新快照，避免半次同步留下混合数据。
+ * 事件 id 由本地生成，仅用于渲染 key；外部 UID 单独保存。
+ */
+export function replaceCalendarEvents(
+  subscriptionId: string,
+  events: CalendarEventInput[]
+): number {
+  const owner = String(subscriptionId)
+  return transaction(() => {
+    conn().prepare('DELETE FROM calendar_events WHERE subscription_id = ?').run(owner)
+    const insert = conn().prepare(
+      `INSERT INTO calendar_events
+         (id, subscription_id, uid, title, description, start_at, end_at, all_day, rrule, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    const stamp = nowIso()
+    for (const event of events) {
+      insert.run(
+        randomUUID(),
+        owner,
+        event.uid ?? null,
+        event.title,
+        event.description ?? null,
+        event.startAt,
+        event.endAt ?? null,
+        event.allDay ? 1 : 0,
+        event.rrule ?? null,
+        stamp
+      )
+    }
+    return events.length
+  })
+}
+
+function calendarRangeBoundary(value: string, endOfDay: boolean): string {
+  if (typeof value !== 'string' || !value.trim()) throw new Error('日历查询范围不能为空')
+  const raw = value.trim()
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+  if (dateOnly) {
+    const [year, month, day] = raw.split('-').map(Number)
+    const date = new Date(
+      year,
+      month - 1,
+      day,
+      endOfDay ? 23 : 0,
+      endOfDay ? 59 : 0,
+      endOfDay ? 59 : 0,
+      endOfDay ? 999 : 0
+    )
+    if (Number.isNaN(date.getTime()) || format(date, 'yyyy-MM-dd') !== raw) {
+      throw new Error('日历查询日期无效')
+    }
+    return date.toISOString()
+  }
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) throw new Error('日历查询日期无效')
+  return parsed.toISOString()
+}
+
+/**
+ * 返回与 [fromIso, toIso] 有交集的事件。from/to 既接受完整 ISO 时间，
+ * 也接受 yyyy-MM-dd：后者按本地日边界展开，以正确覆盖全天事件。
+ */
+export function getCalendarEvents(fromIso: string, toIso: string): CalendarEvent[] {
+  const from = calendarRangeBoundary(fromIso, false)
+  const to = calendarRangeBoundary(toIso, true)
+  if (from > to) throw new Error('日历查询范围无效')
+  const rows = conn()
+    .prepare(
+      `SELECT * FROM calendar_events
+       WHERE start_at <= ? AND COALESCE(end_at, start_at) >= ?
+       ORDER BY start_at ASC, id ASC`
+    )
+    .all(to, from) as unknown as CalendarEventRow[]
+  return rows.map(mapCalendarEvent)
+}
+
+/** 清除订阅配置和全部已同步快照（单订阅模型）。 */
+export function clearCalendarSubscription(): void {
+  transaction(() => {
+    conn().prepare('DELETE FROM calendar_events').run()
+    conn().prepare('DELETE FROM calendar_subscription WHERE id = 1').run()
+  })
 }

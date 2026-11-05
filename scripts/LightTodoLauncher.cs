@@ -161,6 +161,13 @@ internal static class LightTodoLauncher {
             foreach (string arg in args) { arguments.Append(Quote(arg)); arguments.Append(' '); }
             int code = Run(runtime, arguments.ToString());
             TryLog("exit=" + code);
+            // 0x80000003：Chromium 在受限/远程会话里初始化失败。自动降级重试一次，
+            // 让用户双击 exe 也能起来，而不是只留一行退出码。
+            if (code == unchecked((int)0x80000003) && arguments.ToString().IndexOf("--no-sandbox", StringComparison.OrdinalIgnoreCase) < 0) {
+                TryLog("retry with --no-sandbox --disable-gpu");
+                code = Run(runtime, arguments.ToString() + "--no-sandbox --disable-gpu ");
+                TryLog("exit-retry=" + code);
+            }
             return code;
         } catch (Exception error) {
             MessageBox.Show(error.Message + "\n日志：" + log, "轻单启动失败", MessageBoxButtons.OK, MessageBoxIcon.Error);

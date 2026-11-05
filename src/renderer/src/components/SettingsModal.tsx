@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   Archive,
+  CalendarDays,
   Download,
   FolderOpen,
   HardDrive,
@@ -8,6 +9,7 @@ import {
   Palette,
   PawPrint,
   Power,
+  RefreshCw,
   RotateCcw,
   Tag as TagIcon,
   Trash2,
@@ -15,12 +17,40 @@ import {
 } from 'lucide-react'
 import { useStore } from '../store'
 import { DEFAULT_PET_SETTINGS, type PetSettings } from '@shared/pet'
+import { DEFAULT_ISLAND_SETTINGS, ISLAND_ACCENTS, type IslandAccent, type IslandSettings } from '@shared/island'
 import { Mascot } from '../pet/Mascot'
 
 interface Backup {
   name: string
   size: number
   time: number
+}
+
+interface CalendarSubscriptionView {
+  id: number
+  url: string
+  name: string | null
+  lastSyncedAt: string | null
+  lastError: string | null
+  updatedAt: string
+}
+
+function readableError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/, '')
+}
+
+function formatSyncTime(value: string | null): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
 }
 
 const THEMES = [
@@ -54,13 +84,65 @@ export function SettingsModal(): React.JSX.Element {
   const [pet, setPet] = useState<PetSettings>(DEFAULT_PET_SETTINGS)
   const [petReady, setPetReady] = useState(false)
   const [petSaving, setPetSaving] = useState(false)
-  const [section, setSection] = useState('pet')
+  const [island, setIsland] = useState<IslandSettings>(DEFAULT_ISLAND_SETTINGS)
+  const [islandSaving, setIslandSaving] = useState(false)
+  const [section, setSection] = useState('appearance')
+  const [calendarUrl, setCalendarUrl] = useState('')
+  const [calendarSub, setCalendarSub] = useState<CalendarSubscriptionView | null>(null)
+  const [calendarBusy, setCalendarBusy] = useState(false)
+
+  const changeIsland = async (patch: Partial<IslandSettings>): Promise<void> => {
+    setIslandSaving(true)
+    try { setIsland(await window.api.island.setSettings(patch)) }
+    catch { showToast('任务岛设置失败，请重试') }
+    finally { setIslandSaving(false) }
+  }
 
   const changePet = async (patch: Partial<PetSettings>): Promise<void> => {
     setPetSaving(true)
     try { setPet(await window.api.pet.setSettings(patch)) }
     catch { showToast('桌面伙伴设置失败，请重试') }
     finally { setPetSaving(false) }
+  }
+
+  const syncCalendar = async (): Promise<void> => {
+    const url = calendarUrl.trim()
+    if (!url) {
+      showToast('请输入日历订阅地址')
+      return
+    }
+    setCalendarBusy(true)
+    try {
+      const result = await window.api.calendar.syncIcs(url)
+      const subscription = await window.api.calendar.getSubscription()
+      setCalendarSub(subscription)
+      setCalendarUrl(result.url)
+      showToast(`已同步 ${result.count} 个日程`)
+      window.dispatchEvent(new Event('lighttodo:calendar-changed'))
+    } catch (error) {
+      const message = readableError(error)
+      showToast(/^同步失败/.test(message) ? message : `同步失败：${message}`)
+      try { setCalendarSub(await window.api.calendar.getSubscription()) } catch { /* ignore */ }
+    } finally {
+      setCalendarBusy(false)
+    }
+  }
+
+  const clearCalendar = async (): Promise<void> => {
+    if (!calendarSub) return
+    if (!window.confirm('清除日历订阅及本地已同步的日程？不会修改外部日历。')) return
+    setCalendarBusy(true)
+    try {
+      await window.api.calendar.clearIcs()
+      setCalendarSub(null)
+      setCalendarUrl('')
+      showToast('已清除日历订阅')
+      window.dispatchEvent(new Event('lighttodo:calendar-changed'))
+    } catch (error) {
+      showToast(`清除失败：${readableError(error)}`)
+    } finally {
+      setCalendarBusy(false)
+    }
   }
 
   const loadBackups = (): void => {
@@ -72,9 +154,16 @@ export function SettingsModal(): React.JSX.Element {
     window.api.data.getLoginItem().then(setLogin)
     window.api.settings.get('reminders_enabled').then((v) => setReminders(v !== '0'))
     loadBackups()
-    window.api.pet.settings().then(value => { setPet(value); setPetReady(true) })
+    window.api.pet.settings().then(value => { setPet(value); setPetReady(true) }).catch(() => setPetReady(false))
+    window.api.island.settings().then(setIsland).catch(() => {})
+    window.api.calendar.getSubscription().then((subscription) => {
+      setCalendarSub(subscription)
+      if (subscription) setCalendarUrl(subscription.url)
+    }).catch(() => undefined)
     return window.api.pet.onSettings(setPet)
   }, [])
+
+  useEffect(() => window.api.island.onSettings(setIsland), [])
 
   useEffect(() => {
     const dialog = document.querySelector<HTMLElement>('.settings')
@@ -160,9 +249,37 @@ export function SettingsModal(): React.JSX.Element {
         </div>
 
         <nav className="settings-tabs" aria-label="设置分类">
-          {[['pet', '桌面伙伴'], ['appearance', '外观与启动'], ['tags', '标签管理'], ['data', '数据与备份'], ['about', '关于']].map(([key, name]) => <button key={key} aria-current={section === key ? 'page' : undefined} className={section === key ? 'active' : ''} onClick={() => setSection(key)}>{name}</button>)}
+          {[['island', '任务岛'], ['appearance', '外观与启动'], ['tags', '标签管理'], ['data', '数据与备份'], ['about', '关于']].map(([key, name]) => <button key={key} aria-current={section === key ? 'page' : undefined} className={section === key ? 'active' : ''} onClick={() => setSection(key)}>{name}</button>)}
         </nav>
         <div className="settings-body">
+          <section className="set-section island-settings" hidden={section !== 'island'}>
+            <div className="set-title">任务岛</div>
+            <label className="set-row clickable">
+              <span className="set-label">开启任务岛</span>
+              <input type="checkbox" role="switch" checked={island.enabled} disabled={islandSaving} onChange={e => changeIsland({ enabled: e.target.checked })}/>
+              <span className="set-hint">默认开启；顶部胶囊显示今日进度，关闭后可从托盘再打开</span>
+            </label>
+            <div className="set-row">
+              <span className="set-label">进度颜色</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {(Object.keys(ISLAND_ACCENTS) as IslandAccent[]).map(key => (
+                  <button
+                    key={key}
+                    aria-label={'进度色 ' + key}
+                    aria-pressed={island.accent === key}
+                    onClick={() => changeIsland({ accent: key })}
+                    style={{
+                      width: 22, height: 22, borderRadius: '50%', background: ISLAND_ACCENTS[key],
+                      outline: island.accent === key ? '2px solid currentColor' : 'none',
+                      outlineOffset: 2
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="set-row"><span className="set-label">提醒色</span><span className="set-hint">临近到期（60 分钟内）转橙、逾期转红、全部完成转绿；深浅色跟随应用主题</span></div>
+          </section>
+
           <section className="set-section pet-settings" hidden={section !== 'pet'}>
             <div className="pet-settings-preview">
               <Mascot skin={pet.skin}/>
