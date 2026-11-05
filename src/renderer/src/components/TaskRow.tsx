@@ -1,4 +1,4 @@
-import { Check, Clock, Repeat } from 'lucide-react'
+import { Check, Clock, Moon, Repeat } from 'lucide-react'
 import { useStore } from '../store'
 import { dueLabel } from '../lib/format'
 import type { Task } from '@shared/types'
@@ -61,6 +61,12 @@ export function TaskRow({ task }: { task: Task }): React.JSX.Element {
             <span className="meta-chip list">
               <span className="meta-dot" style={{ background: list.color ?? 'var(--accent)' }} />
               {list.name}
+            </span>
+          )}
+          {task.someday && view.type !== 'someday' && (
+            <span className="meta-chip">
+              <Moon size={11} />
+              也许
             </span>
           )}
           {due.text && (

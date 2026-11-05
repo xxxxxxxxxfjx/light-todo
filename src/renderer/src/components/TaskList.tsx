@@ -1,9 +1,10 @@
-import { Plus, Sparkles, Trash2 } from 'lucide-react'
+import { Check, Plus, RotateCcw, Sparkles, Trash2 } from 'lucide-react'
 import { useStore, type TaskFilter } from '../store'
 import { TaskRow } from './TaskRow'
 import { differenceInCalendarDays, format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { parseLocalDate } from '../lib/format'
+import { isOverdue, matchFilter } from '../lib/task-filter'
 import type { Task } from '@shared/types'
 
 const FILTERS: { key: TaskFilter; label: string }[] = [
@@ -14,31 +15,13 @@ const FILTERS: { key: TaskFilter; label: string }[] = [
   { key: 'nodate', label: '无日期' }
 ]
 
-function isOverdue(t: Task): boolean {
-  const todayStart = new Date()
-  todayStart.setHours(0, 0, 0, 0)
-  if (t.scheduledDate) {
-    return parseLocalDate(t.scheduledDate).getTime() < todayStart.getTime()
-  }
-  if (t.dueAt) {
-    return new Date(t.dueAt).getTime() < todayStart.getTime()
-  }
-  return false
-}
-
-function matchFilter(t: Task, f: TaskFilter): boolean {
-  if (f === 'all') return true
-  if (f === 'high') return t.priority === 3
-  if (f === 'nodate') return !t.scheduledDate && !t.dueAt
-  if (f === 'overdue') return isOverdue(t)
-  if (f === 'today') {
-    const today = format(new Date(), 'yyyy-MM-dd')
-    return (
-      t.scheduledDate === today ||
-      (!!t.dueAt && format(new Date(t.dueAt), 'yyyy-MM-dd') === today)
-    )
-  }
-  return true
+const FILTERS_BY_VIEW: Record<string, TaskFilter[]> = {
+  today: ['all', 'today', 'overdue', 'high', 'nodate'],
+  upcoming: ['all', 'high'],
+  all: ['all', 'today', 'overdue', 'high', 'nodate'],
+  someday: ['all', 'high'],
+  list: ['all', 'today', 'overdue', 'high', 'nodate'],
+  tag: ['all', 'today', 'overdue', 'high', 'nodate']
 }
 
 function dayKey(t: Task): string {
@@ -62,6 +45,10 @@ export function TaskList(): React.JSX.Element {
     tasks,
     view,
     loading,
+    error,
+    hasMore,
+    loadMore,
+    refresh,
     openQuickAdd,
     selected,
     filter,
@@ -71,13 +58,19 @@ export function TaskList(): React.JSX.Element {
     selectMode,
     selectedIds,
     toggleSelectMode,
+    toggleSelectId,
     selectAll,
     clearSelection,
     batchComplete,
-    batchDelete
+    batchDelete,
+    batchRestore,
+    batchPurge
   } = useStore()
 
   const visible = tasks.filter((t) => matchFilter(t, filter))
+  const visibleFilters = FILTERS.filter((f) =>
+    (FILTERS_BY_VIEW[view.type] ?? ['all']).includes(f.key)
+  )
   let sections: { key: string; label: string; tasks: Task[] }[] = []
 
   if (view.type === 'today') {
@@ -120,14 +113,12 @@ export function TaskList(): React.JSX.Element {
           </span>
         </div>
         <div className="head-actions">
-          {view.type !== 'trash' && view.type !== 'completed' && (
-            <button
-              className={`ghost-btn ${selectMode ? 'active' : ''}`}
-              onClick={toggleSelectMode}
-            >
-              {selectMode ? '退出多选' : '多选'}
-            </button>
-          )}
+          <button
+            className={`ghost-btn ${selectMode ? 'active' : ''}`}
+            onClick={toggleSelectMode}
+          >
+            {selectMode ? '退出多选' : '多选'}
+          </button>
           <button className="ghost-btn" onClick={() => openQuickAdd()}>
             <Plus size={15} />
             添加任务
@@ -141,20 +132,47 @@ export function TaskList(): React.JSX.Element {
           <button className="mini-btn" onClick={selectAll}>
             全选
           </button>
-          <button
-            className="mini-btn"
-            disabled={!selectedIds.length}
-            onClick={() => batchComplete()}
-          >
-            完成
-          </button>
-          <button
-            className="mini-btn danger"
-            disabled={!selectedIds.length}
-            onClick={() => batchDelete()}
-          >
-            删除
-          </button>
+          {view.type === 'trash' ? (
+            <>
+              <button
+                className="mini-btn"
+                disabled={!selectedIds.length}
+                onClick={() => batchRestore()}
+              >
+                恢复
+              </button>
+              <button
+                className="mini-btn danger"
+                disabled={!selectedIds.length}
+                onClick={() => {
+                  if (window.confirm(`彻底删除选中的 ${selectedIds.length} 项？此操作不可撤销。`)) {
+                    batchPurge()
+                  }
+                }}
+              >
+                彻底删除
+              </button>
+            </>
+          ) : (
+            <>
+              {view.type !== 'completed' && (
+                <button
+                  className="mini-btn"
+                  disabled={!selectedIds.length}
+                  onClick={() => batchComplete()}
+                >
+                  完成
+                </button>
+              )}
+              <button
+                className="mini-btn danger"
+                disabled={!selectedIds.length}
+                onClick={() => batchDelete()}
+              >
+                删除
+              </button>
+            </>
+          )}
           <button className="mini-btn" onClick={clearSelection}>
             取消
           </button>
@@ -162,8 +180,9 @@ export function TaskList(): React.JSX.Element {
       )}
 
       {!['trash', 'completed', 'calendar'].includes(view.type) && (
-        <div className="filter-bar">
-          {FILTERS.map((f) => (
+        <div className="filter-bar" role="group" aria-label="筛选任务">
+          <span className="filter-label">筛选</span>
+          {visibleFilters.map((f) => (
             <button
               key={f.key}
               className={`filter-chip ${filter === f.key ? 'active' : ''}`}
@@ -175,7 +194,12 @@ export function TaskList(): React.JSX.Element {
         </div>
       )}
 
+      {view.type === 'someday' && (
+        <div className="view-hint">这里放暂时不安排日期的想法，不会进入「今天」。</div>
+      )}
+
       <div className="task-scroll">
+        {error && <div className="list-error" role="alert">{error} <button className="mini-btn" onClick={() => refresh()}>重试</button></div>}
         {loading && visible.length === 0 && <div className="list-loading">加载中…</div>}
 
         {!loading && visible.length === 0 && (
@@ -195,28 +219,45 @@ export function TaskList(): React.JSX.Element {
 
         {view.type === 'trash' ? (
           <div className="trash-list">
-            {visible.map((t) => (
-              <div key={t.id} className="trash-row">
-                <Trash2 size={14} className="trash-icon" />
-                <div className="trash-main">
-                  <div className="task-title">{t.title}</div>
-                  <div className="task-meta">
-                    删除于 {t.deletedAt ? new Date(t.deletedAt).toLocaleString('zh-CN') : '—'}
-                  </div>
-                </div>
-                <button className="mini-btn" onClick={() => restoreTask(t.id)}>
-                  恢复
-                </button>
-                <button
-                  className="danger-btn"
-                  onClick={() => {
-                    if (window.confirm(`彻底删除「${t.title}」？此操作不可撤销。`)) purgeTask(t.id)
-                  }}
+            {visible.map((t) => {
+              const checked = selectedIds.includes(t.id)
+              return (
+                <div
+                  key={t.id}
+                  className={`trash-row ${checked ? 'picked' : ''}`}
+                  onClick={() => selectMode && toggleSelectId(t.id)}
                 >
-                  彻底删除
-                </button>
-              </div>
-            ))}
+                  {selectMode ? (
+                    <span className={`select-box ${checked ? 'checked' : ''}`} aria-hidden>
+                      {checked && <Check size={11} strokeWidth={3} />}
+                    </span>
+                  ) : (
+                    <Trash2 size={14} className="trash-icon" />
+                  )}
+                  <div className="trash-main">
+                    <div className="task-title">{t.title}</div>
+                    <div className="task-meta">
+                      删除于 {t.deletedAt ? new Date(t.deletedAt).toLocaleString('zh-CN') : '—'}
+                    </div>
+                  </div>
+                  {!selectMode && (
+                    <>
+                      <button className="mini-btn" onClick={() => restoreTask(t.id)}>
+                        恢复
+                      </button>
+                      <button
+                        className="danger-btn"
+                        onClick={() => {
+                          if (window.confirm(`彻底删除「${t.title}」？此操作不可撤销。`)) purgeTask(t.id)
+                        }}
+                      >
+                        彻底删除
+                      </button>
+                    </>
+                  )}
+                </div>
+              )
+            })}
           </div>
         ) : (
           sections.map((s) => (
@@ -240,6 +281,7 @@ export function TaskList(): React.JSX.Element {
           <div className="list-footnote">任务会保存在本机，退出也不会丢</div>
         )}
       </div>
+      {hasMore && <button className="ghost-btn load-more" disabled={loading} onClick={() => loadMore()}>{loading ? '加载中…' : '加载更多任务'}</button>}
       {selected && <div className="list-pad" />}
     </section>
   )
@@ -247,8 +289,6 @@ export function TaskList(): React.JSX.Element {
 
 function emptyTitle(type: string): string {
   switch (type) {
-    case 'inbox':
-      return '收件箱是空的'
     case 'today':
       return '今天已经清空'
     case 'upcoming':

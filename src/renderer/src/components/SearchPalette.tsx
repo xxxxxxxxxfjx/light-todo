@@ -16,17 +16,19 @@ export function SearchPalette(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
+    let cancelled = false
     if (!q.trim()) {
       setResults([])
       return
     }
     const t = setTimeout(() => {
       window.api.search.query(q).then((r) => {
+        if (cancelled) return
         setResults(r)
         setActive(0)
       })
     }, 140)
-    return () => clearTimeout(t)
+    return () => { cancelled = true; clearTimeout(t) }
   }, [q])
 
   const open = async (task: Task): Promise<void> => {
@@ -44,6 +46,7 @@ export function SearchPalette(): React.JSX.Element {
             placeholder="搜索任务、备注、标签…"
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return
               if (e.key === 'Escape') closeSearch()
               if (e.key === 'ArrowDown') {
                 e.preventDefault()

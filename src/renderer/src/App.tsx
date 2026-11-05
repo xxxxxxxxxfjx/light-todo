@@ -24,13 +24,16 @@ export default function App(): React.JSX.Element {
     closeSettings,
     toast,
     selected,
+    selectTask,
     toggleTask,
     setView,
     view,
     selectTaskById,
     deleteTask,
     updateTask,
-    showToast
+    showToast,
+    sidebarOpen,
+    closeSidebar
   } = useStore()
 
   useEffect(() => {
@@ -38,31 +41,47 @@ export default function App(): React.JSX.Element {
     if (savedTheme && savedTheme !== 'system') {
       document.documentElement.dataset.theme = savedTheme
     }
+    window.api.app.setTheme(savedTheme === 'light' || savedTheme === 'dark' ? savedTheme : 'system')
     refreshSidebar()
     refresh()
     const dv = localStorage.getItem('lighttodo.defaultView')
-    if (dv && dv !== 'today') {
-      setView(dv as Parameters<typeof setView>[0], {
+    if (dv === 'upcoming' || dv === 'all' || dv === 'someday') {
+      setView(dv, {
         title:
-          dv === 'upcoming' ? '最近 7 天' : dv === 'all' ? '全部' : dv === 'someday' ? '也许' : '今天'
+          dv === 'upcoming' ? '最近 7 天' : dv === 'all' ? '全部' : '也许'
       })
     }
     const offQuick = window.api.onQuickAdd((text) => openQuickAdd(text ?? ''))
     const offOpen = window.api.onOpenTask((id) => selectTaskById(id))
+    const offSettings = window.api.onSettings(() => useStore.getState().openSettings())
+    const offTasks = window.api.onTasksChanged(() => {
+      refresh()
+      refreshSidebar()
+      const id = useStore.getState().selected?.id
+      if (id) selectTaskById(id)
+    })
+    const reportFailure = (event: PromiseRejectionEvent): void => {
+      showToast(`操作失败，请重试：${String(event.reason?.message ?? event.reason)}`)
+    }
+    window.addEventListener('unhandledrejection', reportFailure)
     return () => {
       offQuick()
       offOpen()
+      offSettings()
+      offTasks()
+      window.removeEventListener('unhandledrejection', reportFailure)
     }
   }, [])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
+      if (e.isComposing || e.keyCode === 229) return
       const target = e.target as HTMLElement
       const typing =
         target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
       const mod = e.ctrlKey || e.metaKey
 
-      if (mod && e.key.toLowerCase() === 'k') {
+      if (mod && e.key.toLowerCase() === 'f') {
         e.preventDefault()
         openSearch()
         return
@@ -78,7 +97,7 @@ export default function App(): React.JSX.Element {
         closeSettings()
         return
       }
-      if (typing) return
+      if (typing || quickAddOpen || searchOpen || settingsOpen) return
 
       if (mod && /^[1-6]$/.test(e.key)) {
         e.preventDefault()
@@ -120,15 +139,29 @@ export default function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [selected, quickAddOpen, searchOpen, view])
+  }, [selected, quickAddOpen, searchOpen, settingsOpen, view])
+
+  useEffect(() => {
+    if (!selected) return
+    const closeOnUnrelatedClick = (event: MouseEvent): void => {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      if (target.closest('.detail')) return
+      if (target.closest('.task-row, .cal-item, .agenda-row, .week-task, .search-row')) return
+      selectTask(null)
+    }
+    document.addEventListener('click', closeOnUnrelatedClick)
+    return () => document.removeEventListener('click', closeOnUnrelatedClick)
+  }, [selected, selectTask])
 
   return (
     <div className="app">
       <TitleBar onSearch={openSearch} />
-      <div className="shell">
+      <div className={`shell ${selected ? 'has-detail' : ''} ${sidebarOpen ? 'navigation-open' : ''}`}>
+        {sidebarOpen && <button className="sidebar-backdrop" aria-label="关闭侧栏" onClick={closeSidebar}/>}
         <Sidebar />
         {view.type === 'calendar' ? <CalendarView /> : <TaskList />}
-        <DetailPanel />
+        {(view.type !== 'calendar' || selected) && <DetailPanel />}
       </div>
       {quickAddOpen && <QuickAdd />}
       {searchOpen && <SearchPalette />}

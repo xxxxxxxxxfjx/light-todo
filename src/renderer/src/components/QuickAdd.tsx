@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CalendarDays, Clock, Flag, Hash, Repeat, Tag, X } from 'lucide-react'
+import { CalendarDays, Clock, Flag, Hash, Moon, Repeat, Tag, X } from 'lucide-react'
 import { parseQuickAdd } from '@shared/nlp'
-import { format } from 'date-fns'
+import { addDays, format } from 'date-fns'
 import { dateLabel } from '../lib/format'
 import { useStore } from '../store'
 
@@ -29,11 +29,16 @@ export function QuickAdd(): React.JSX.Element {
     showToast,
     view,
     quickAddInitial,
-    quickAddDate
+    quickAddDate,
+    setFilter
   } = useStore()
+  const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
   const [text, setText] = useState(quickAddInitial)
   const ref = useRef<HTMLTextAreaElement>(null)
   const parsed = useMemo(() => parseQuickAdd(text), [text])
+  const previewSomeday =
+    view.type === 'someday' && !parsed.scheduledDate && !parsed.dueAt && !quickAddDate
 
   useEffect(() => {
     ref.current?.focus()
@@ -41,9 +46,12 @@ export function QuickAdd(): React.JSX.Element {
 
   const submit = async (keepOpen = false): Promise<void> => {
     const title = parsed.title.trim()
-    if (!title) return
+    if (!title || savingRef.current) return
+    savingRef.current = true
+    setSaving(true)
+    try {
 
-    // 清单归属：#清单名 优先，否则用当前所在的清单视图，否则收件箱
+    // 清单归属：#清单名 优先，否则用当前所在的清单视图
     let listId: string | null = null
     if (parsed.listName) {
       const found = sidebar.lists.find((l) => l.name === parsed.listName)
@@ -58,31 +66,45 @@ export function QuickAdd(): React.JSX.Element {
       listId = view.listId
     }
 
+    // 标签归属：当前标签视图下新增时，自动带上该标签
+    const tagNames = [...parsed.tagNames]
+    if (view.type === 'tag' && view.tagId) {
+      const currentTag = sidebar.tags.find((t) => t.id === view.tagId)
+      if (currentTag && !tagNames.includes(currentTag.name)) tagNames.push(currentTag.name)
+    }
+
     // 日期默认：日历点选的那天 > NLP 解析 > 当前视图约定
     let scheduledDate = parsed.scheduledDate ?? quickAddDate
-    if (!scheduledDate && !parsed.dueAt) {
-      if (view.type === 'today' || view.type === 'upcoming') {
-        scheduledDate = format(new Date(), 'yyyy-MM-dd')
-      }
+    if (!scheduledDate && !parsed.dueAt && view.type !== 'someday') {
+      scheduledDate =
+        view.type === 'upcoming'
+          ? format(addDays(new Date(), 1), 'yyyy-MM-dd')
+          : format(new Date(), 'yyyy-MM-dd')
     }
+    const isSomeday =
+      view.type === 'someday' && !scheduledDate && !parsed.dueAt
 
     await createTask({
       title,
       listId,
+      someday: isSomeday,
       scheduledDate,
       dueAt: parsed.dueAt,
       dueAllDay: parsed.dueAllDay,
       rrule: parsed.rrule,
       repeatFrom: parsed.repeatFrom,
       priority: parsed.priority,
-      tagNames: parsed.tagNames
+      tagNames
     })
+    setFilter('all')
     showToast(
-      parsed.listName || view.type === 'list'
-        ? `已添加到${parsed.listName ?? view.title}`
-        : scheduledDate
-          ? `已添加到 ${dateLabel(scheduledDate)}`
-          : '已添加到今天'
+      isSomeday
+        ? '已加入也许'
+        : parsed.listName || view.type === 'list'
+          ? `已添加到${parsed.listName ?? view.title}`
+          : scheduledDate
+            ? `已添加到 ${dateLabel(scheduledDate)}`
+            : '已添加'
     )
     if (keepOpen) {
       setText('')
@@ -90,6 +112,9 @@ export function QuickAdd(): React.JSX.Element {
     } else {
       closeQuickAdd()
     }
+    } catch (error) {
+      showToast(`添加失败：${String(error)}`)
+    } finally { savingRef.current = false; setSaving(false) }
   }
 
   return (
@@ -101,9 +126,14 @@ export function QuickAdd(): React.JSX.Element {
             className="qa-input"
             rows={1}
             value={text}
-            placeholder="明天下午 3 点 交周报 #工作 @汇报 !高"
+            placeholder={
+              view.type === 'someday'
+                ? '写下一个以后可能做的想法…'
+                : '明天下午 3 点 交周报 #工作 @汇报 !高'
+            }
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
                 submit(e.ctrlKey || e.metaKey)
@@ -116,8 +146,11 @@ export function QuickAdd(): React.JSX.Element {
           </button>
         </div>
 
-        {(parsed.scheduledDate || parsed.dueAt || parsed.priority || parsed.listName || parsed.tagNames.length > 0 || parsed.rrule || quickAddDate) && (
+        {(parsed.scheduledDate || parsed.dueAt || parsed.priority || parsed.listName || parsed.tagNames.length > 0 || parsed.rrule || quickAddDate || previewSomeday) && (
           <div className="qa-chips">
+            {previewSomeday && (
+              <Chip icon={Moon}>也许</Chip>
+            )}
             {(parsed.scheduledDate || quickAddDate) && (
               <Chip icon={CalendarDays}>{dateLabel(parsed.scheduledDate ?? quickAddDate!)}</Chip>
             )}
@@ -146,8 +179,8 @@ export function QuickAdd(): React.JSX.Element {
             <kbd>Esc</kbd> 取消
           </span>
           <span className="qa-syntax">支持：明天 / 每周一 / 每月5号 / !高 / #清单 / @标签</span>
-          <button className="qa-submit" onClick={() => submit(false)}>
-            添加
+          <button className="qa-submit" disabled={saving} onClick={() => submit(false)}>
+            {saving ? '保存中…' : '添加'}
           </button>
         </div>
       </div>

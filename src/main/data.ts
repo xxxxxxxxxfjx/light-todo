@@ -13,6 +13,7 @@ import { basename, join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { checkpoint, clearCompleted, closeDb, getAllData, getDataDir } from './db'
 import { importFromText } from './import'
+import { notifyTaskWindows } from './pet'
 
 function stamp(): string {
   const d = new Date()
@@ -74,9 +75,9 @@ function markdown(): string {
     if (!byList.has(key)) byList.set(key, [])
     byList.get(key)!.push(t)
   }
-  const listName = (id: string): string => data.lists.find((l) => l.id === id)?.name ?? '收件箱'
+  const listName = (id: string): string => data.lists.find((l) => l.id === id)?.name ?? '未分类'
   for (const [listId, tasks] of byList) {
-    lines.push(`## ${listId ? listName(listId) : '收件箱'}`, '')
+    lines.push(`## ${listId ? listName(listId) : '未分类'}`, '')
     for (const t of tasks) {
       const done = t.status === 1 ? 'x' : ' '
       const bits: string[] = []
@@ -115,7 +116,8 @@ export function registerDataIpc(): void {
         const p = dest + suffix
         if (existsSync(p)) unlinkSync(p)
       }
-      app.relaunch()
+      const launcher = join(process.execPath, '..', 'LightTodo.exe')
+      app.relaunch({ execPath: app.isPackaged && existsSync(launcher) ? launcher : process.execPath })
       app.exit(0)
       return { ok: true }
     } catch (e) {
@@ -160,14 +162,18 @@ export function registerDataIpc(): void {
       return { ok: false, lists: 0, tasks: 0, tags: 0, errors: [], message: '已取消' }
     }
     const path = res.filePaths[0]
-    return importFromText(readFileSync(path, 'utf8'), basename(path))
+    const result = importFromText(readFileSync(path, 'utf8'), basename(path))
+    notifyTaskWindows()
+    return result
   })
   // Windows 自启直接写 HKCU Run，避免 Electron API 的 path/args 匹配问题
   const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+  const launcher = join(process.execPath, '..', 'LightTodo.exe')
+  const loginExe = app.isPackaged && existsSync(launcher) ? launcher : process.execPath
   const loginArgs = app.isPackaged ? ['--hidden'] : [app.getAppPath(), '--hidden']
   const loginCommand = (): string => {
     const appArg = app.isPackaged ? '' : ` "${app.getAppPath()}"`
-    return `"${process.execPath}"${appArg} --hidden`
+    return `"${loginExe}"${appArg} --hidden`
   }
   const loginEnabled = (): boolean => {
     try {
@@ -182,7 +188,7 @@ export function registerDataIpc(): void {
   }
   ipcMain.handle('app:getLoginItem', () => {
     try {
-      if (app.getLoginItemSettings({ path: process.execPath, args: loginArgs }).openAtLogin) return true
+      if (app.getLoginItemSettings({ path: loginExe, args: loginArgs }).openAtLogin) return true
     } catch {
       /* ignore */
     }
@@ -191,7 +197,7 @@ export function registerDataIpc(): void {
   ipcMain.handle('app:setLoginItem', (_e, enabled: boolean) => {
     // 双保险：Electron 登录项 + HKCU Run（某些环境其中一个会被策略挡住）
     try {
-      app.setLoginItemSettings({ openAtLogin: enabled, path: process.execPath, args: loginArgs })
+      app.setLoginItemSettings({ openAtLogin: enabled, path: loginExe, args: loginArgs })
     } catch {
       /* ignore */
     }
@@ -210,7 +216,7 @@ export function registerDataIpc(): void {
     }
     let viaElectron = false
     try {
-      viaElectron = app.getLoginItemSettings({ path: process.execPath, args: loginArgs }).openAtLogin
+      viaElectron = app.getLoginItemSettings({ path: loginExe, args: loginArgs }).openAtLogin
     } catch {
       /* ignore */
     }

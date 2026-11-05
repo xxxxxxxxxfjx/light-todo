@@ -6,17 +6,24 @@ import {
   Notification,
   nativeImage,
   globalShortcut,
+  dialog,
+  ipcMain,
+  nativeTheme,
   screen
 } from 'electron'
 import { join } from 'node:path'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { release } from 'node:os'
-import { initDb, closeDb, getDueReminders, getSetting, markReminderSent } from './db'
+import { initDb, closeDb, getDueReminders, getSetting, setSetting, markReminderSent } from './db'
+import { windowColors, type ThemePreference } from './window-theme'
 import { registerIpc } from './ipc'
 import { backupNow, registerDataIpc } from './data'
+import { registerPet, stopPet, togglePet } from './pet'
 
 const T0 = Date.now()
 const isDev = !app.isPackaged
+const launcherPath = app.isPackaged && existsSync(join(process.execPath, '..', 'LightTodo.exe'))
+  ? join(process.execPath, '..', 'LightTodo.exe') : process.execPath
 
 // 便携版把数据放在 exe 同目录；开发环境放工作区；也可用环境变量显式指定。
 const portableRoot = process.env.PORTABLE_EXECUTABLE_DIR
@@ -27,8 +34,16 @@ const dataRootOverride =
   portableRoot ??
   (isDev ? join(app.getAppPath(), '.data') : null)
 if (dataRootOverride) {
+  mkdirSync(join(dataRootOverride, 'userdata'), { recursive: true })
   app.setPath('userData', join(dataRootOverride, 'userdata'))
 }
+const logFile = join(app.getPath('userData'), 'startup.log')
+function log(message: string): void {
+  try { appendFileSync(logFile, `${new Date().toISOString()} ${message}\n`) } catch { /* best effort */ }
+}
+log(`Starting ${app.getVersion()} ${process.execPath}`)
+process.on('uncaughtException', error => { log(error.stack ?? String(error)); dialog.showErrorBox('轻单运行错误', `${error.message}\n\n日志：${logFile}`) })
+process.on('unhandledRejection', error => log(`Unhandled rejection: ${String(error)}`))
 
 const win11 = process.platform === 'win32' && Number(release().split('.')[2] ?? 0) >= 22000
 const shotArg = process.argv.find((a) => a.startsWith('--screenshot'))
@@ -36,13 +51,27 @@ const shotPath = shotArg?.includes('=') ? shotArg.split('=')[1] : process.env.LI
 const qaArg = process.argv.find((a) => a.startsWith('--qa='))?.split('=')[1]
 const e2eArg = process.argv.find((a) => a.startsWith('--e2e='))?.split('=')[1]
 
-if (!app.requestSingleInstanceLock()) {
+const ownsInstance = app.requestSingleInstanceLock()
+if (!ownsInstance) {
+  log('Forwarded to existing instance')
   app.quit()
 }
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
+let appliedWindowColors = windowColors(nativeTheme.shouldUseDarkColors)
+
+function syncWindowTheme(): ReturnType<typeof windowColors> {
+  const colors = windowColors(nativeTheme.shouldUseDarkColors)
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setBackgroundColor(colors.color)
+    if (process.platform === 'win32') mainWindow.setTitleBarOverlay({ ...colors, height: 40 })
+    appliedWindowColors = colors
+  }
+  return colors
+}
+nativeTheme.on('updated', syncWindowTheme)
 
 function resolveDataDir(): string {
   if (process.env.LIGHTTODO_DATA_DIR) return process.env.LIGHTTODO_DATA_DIR
@@ -60,6 +89,8 @@ function iconPath(): string {
 }
 
 function showMain(): void {
+  if (isQuitting) return
+  if (!app.isReady()) { app.once('ready', showMain); return }
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow()
     return
@@ -81,22 +112,21 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width,
     height,
-    minWidth: 960,
-    minHeight: 600,
+    minWidth: 720,
+    minHeight: 520,
     show: false,
     title: '轻单',
     titleBarStyle: 'hidden',
     ...(process.platform === 'win32'
       ? {
           titleBarOverlay: {
-            color: win11 ? '#00000000' : '#f3f3f5',
-            symbolColor: '#3b3b41',
+            ...windowColors(nativeTheme.shouldUseDarkColors),
             height: 40
           },
           ...(win11 ? { backgroundMaterial: 'mica' as const } : {})
         }
       : {}),
-    backgroundColor: '#f3f3f5',
+    backgroundColor: windowColors(nativeTheme.shouldUseDarkColors).color,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -106,13 +136,21 @@ function createWindow(): void {
   })
 
   mainWindow.on('close', (e) => {
-    if (!isQuitting && !shotPath) {
+    if (!isQuitting) {
       e.preventDefault()
-      mainWindow?.hide()
+      app.quit()
     }
+  })
+  mainWindow.on('closed', () => {
+    mainWindow = null
+    if (!isQuitting) app.quit()
+  })
+  mainWindow.webContents.on('destroyed', () => {
+    if (!isQuitting) app.quit()
   })
 
   mainWindow.once('ready-to-show', () => {
+    log('Window ready')
     console.log('COLD_START_MS', Date.now() - T0)
     const hiddenStart = process.argv.includes('--hidden') && !e2eArg && !shotPath
     if (!hiddenStart) mainWindow?.show()
@@ -138,6 +176,15 @@ function createWindow(): void {
         }
       }, 1600)
     }
+  })
+  mainWindow.webContents.on('did-fail-load', (_event, code, description) => {
+    log(`Load failed ${code}: ${description}`)
+    mainWindow?.show()
+    dialog.showErrorBox('轻单页面加载失败', `${description}\n请重新解压完整程序目录后启动。\n日志：${logFile}`)
+  })
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    log(`Renderer exited: ${details.reason}`)
+    app.quit()
   })
 
   if (isDev && process.env.ELECTRON_RENDERER_URL) {
@@ -228,9 +275,13 @@ async function runE2E(win: BrowserWindow, file: string): Promise<void> {
   const results: unknown[] = []
   try {
     const spec = JSON.parse(readFileSync(file, 'utf8')) as {
-      steps: { js?: string; wait?: number; shot?: string }[]
+      steps: { js?: string; wait?: number; shot?: string; size?: [number, number]; nativeThemeSource?: ThemePreference; inspectWindow?: boolean }[]
     }
     for (const step of spec.steps) {
+      if (step.size) { win.setSize(...step.size); await new Promise(r => setTimeout(r, 250)) }
+      // These controls are only available to the existing --e2e test runner.
+      if (step.nativeThemeSource) { nativeTheme.themeSource = step.nativeThemeSource; await new Promise(r => setTimeout(r, 250)) }
+      if (step.inspectWindow) results.push({ size: win.getSize(), overlay: appliedWindowColors })
       if (step.shot) {
         const image = await win.webContents.capturePage()
         writeFileSync(step.shot, image.toPNG())
@@ -263,6 +314,7 @@ function createTray(): void {
   const menu = Menu.buildFromTemplate([
     { label: '打开轻单', click: showMain },
     { label: '新建任务', accelerator: 'CommandOrControl+Shift+Space', click: quickAdd },
+    { label: '显示 / 隐藏桌面伙伴', click: togglePet },
     { type: 'separator' },
     {
       label: '退出',
@@ -346,7 +398,7 @@ function setupIntegration(): void {
     if (process.defaultApp && process.argv.length >= 2) {
       app.setAsDefaultProtocolClient('lighttodo', process.execPath, [process.argv[1]])
     } else {
-      app.setAsDefaultProtocolClient('lighttodo')
+      app.setAsDefaultProtocolClient('lighttodo', launcherPath)
     }
   } catch (e) {
     console.warn('PROTOCOL_REGISTER_FAILED', e)
@@ -358,7 +410,7 @@ function setupIntegration(): void {
         {
           type: 'tasks',
           items: [
-            { type: 'task', title: '新建任务', program: process.execPath, args: '--quick-add' }
+            { type: 'task', title: '新建任务', program: launcherPath, args: '--quick-add' }
           ]
         }
       ])
@@ -375,12 +427,25 @@ function setupIntegration(): void {
   }
 }
 
-app.whenReady().then(() => {
+if (ownsInstance) app.whenReady().then(() => {
   app.setAppUserModelId('com.lighttodo.app')
   initDb(resolveDataDir())
+  const savedTheme = getSetting('ui_theme')
+  nativeTheme.themeSource = savedTheme === 'light' || savedTheme === 'dark' ? savedTheme : 'system'
+  ipcMain.handle('app:setTheme', (_event, theme: ThemePreference) => {
+    if (!['system', 'light', 'dark'].includes(theme)) throw new Error('无效主题')
+    nativeTheme.themeSource = theme
+    setSetting('ui_theme', theme)
+    return { ...syncWindowTheme(), dark: nativeTheme.shouldUseDarkColors }
+  })
   registerIpc()
   registerDataIpc()
   createWindow()
+  registerPet((id, settings) => {
+    showMain()
+    if (id) sendToRendererWhenReady('ui:open-task', id)
+    if (settings) sendToRendererWhenReady('ui:settings')
+  })
   createTray()
   registerShortcuts()
   setupIntegration()
@@ -392,6 +457,10 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
     else showMain()
   })
+}).catch(error => {
+  log(`Startup failed: ${error.stack ?? String(error)}`)
+  dialog.showErrorBox('轻单启动失败', `${String(error)}\n\n数据目录：${resolveDataDir()}\n日志：${logFile}`)
+  app.quit()
 })
 
 app.on('second-instance', (_e, argv) => {
@@ -401,11 +470,12 @@ app.on('second-instance', (_e, argv) => {
 })
 
 app.on('window-all-closed', () => {
-  // Tray app: keep running until explicit quit.
+  app.quit()
 })
 
 app.on('before-quit', () => {
   isQuitting = true
+  stopPet()
   globalShortcut.unregisterAll()
   backupNow('exit')
   closeDb()

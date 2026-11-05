@@ -1,8 +1,14 @@
 import { app, ipcMain, shell } from 'electron'
 import * as db from './db'
 import type { CreateTaskInput, UpdateTaskInput } from '../shared/types'
+import { notifyTaskWindows } from './pet'
 
 export function registerIpc(): void {
+  const mutate = <T>(sender: number, action: () => T): T => {
+    const result = action()
+    notifyTaskWindows(sender)
+    return result
+  }
   ipcMain.handle('app:info', () => ({
     version: app.getVersion(),
     dataDir: db.getDataDir(),
@@ -16,23 +22,23 @@ export function registerIpc(): void {
 
   ipcMain.handle('tasks:list', (_e, opts: Parameters<typeof db.listTasks>[0]) => db.listTasks(opts))
   ipcMain.handle('tasks:get', (_e, id: string) => db.getTask(id))
-  ipcMain.handle('tasks:create', (_e, input: CreateTaskInput) => db.createTask(input))
-  ipcMain.handle('tasks:update', (_e, id: string, patch: UpdateTaskInput) => db.updateTask(id, patch))
-  ipcMain.handle('tasks:setStatus', (_e, id: string, done: boolean) => db.setTaskStatus(id, done))
-  ipcMain.handle('tasks:delete', (_e, id: string) => db.deleteTask(id))
-  ipcMain.handle('tasks:restore', (_e, id: string) => db.restoreTask(id))
-  ipcMain.handle('tasks:purge', (_e, id: string) => db.purgeTask(id))
+  ipcMain.handle('tasks:create', (e, input: CreateTaskInput) => mutate(e.sender.id, () => db.createTask(input)))
+  ipcMain.handle('tasks:update', (e, id: string, patch: UpdateTaskInput) => mutate(e.sender.id, () => db.updateTask(id, patch)))
+  ipcMain.handle('tasks:setStatus', (e, id: string, done: boolean) => mutate(e.sender.id, () => db.setTaskStatus(id, done)))
+  ipcMain.handle('tasks:delete', (e, id: string) => mutate(e.sender.id, () => db.deleteTask(id)))
+  ipcMain.handle('tasks:restore', (e, id: string) => mutate(e.sender.id, () => db.restoreTask(id)))
+  ipcMain.handle('tasks:purge', (e, id: string) => mutate(e.sender.id, () => db.purgeTask(id)))
   ipcMain.handle('tasks:reorder', (_e, items: { id: string; sortOrder: number }[]) =>
-    db.reorderTasks(items)
+    mutate(_e.sender.id, () => db.reorderTasks(items))
   )
 
   ipcMain.handle('lists:create', (_e, input: Parameters<typeof db.createList>[0]) =>
     db.createList(input)
   )
   ipcMain.handle('lists:update', (_e, id: string, patch: Parameters<typeof db.updateList>[1]) =>
-    db.updateList(id, patch)
+    mutate(_e.sender.id, () => db.updateList(id, patch))
   )
-  ipcMain.handle('lists:delete', (_e, id: string) => db.deleteList(id))
+  ipcMain.handle('lists:delete', (e, id: string) => mutate(e.sender.id, () => db.deleteList(id)))
 
   ipcMain.handle('folders:create', (_e, name: string) => db.createFolder(name))
 

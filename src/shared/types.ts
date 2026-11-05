@@ -1,5 +1,4 @@
 export type ViewKey =
-  | 'inbox'
   | 'today'
   | 'upcoming'
   | 'all'
@@ -45,6 +44,7 @@ export interface Task {
   notes: string
   priority: number
   status: number
+  someday: boolean
   scheduledDate: string | null
   dueAt: string | null
   dueAllDay: number
@@ -62,6 +62,7 @@ export interface Task {
   subtaskCount: number
   subtaskDone: number
   subtasks?: Task[]
+  nextOccurrenceId?: string | null
 }
 
 export interface CreateTaskInput {
@@ -70,6 +71,7 @@ export interface CreateTaskInput {
   listId?: string | null
   parentId?: string | null
   priority?: number
+  someday?: boolean
   scheduledDate?: string | null
   dueAt?: string | null
   dueAllDay?: number
@@ -85,6 +87,7 @@ export interface UpdateTaskInput {
   notes?: string
   listId?: string | null
   priority?: number
+  someday?: boolean
   scheduledDate?: string | null
   dueAt?: string | null
   dueAllDay?: number

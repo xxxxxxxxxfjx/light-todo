@@ -1,8 +1,11 @@
-import { Search } from 'lucide-react'
+import { Menu, Search } from 'lucide-react'
+import { useStore } from '../store'
 
 export function TitleBar({ onSearch }: { onSearch: () => void }): React.JSX.Element {
+  const { sidebarOpen, toggleSidebar } = useStore()
   return (
     <header className="titlebar">
+      <button className="icon-btn navigation-toggle" aria-label="切换侧栏" aria-expanded={sidebarOpen} onClick={toggleSidebar}><Menu size={17}/></button>
       <div className="brand">
         <div className="brand-mark">
           <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden>
@@ -21,7 +24,7 @@ export function TitleBar({ onSearch }: { onSearch: () => void }): React.JSX.Elem
       <button className="titlebar-search" onClick={onSearch} title="搜索">
         <Search size={14} />
         <span>搜索</span>
-        <kbd>Ctrl K</kbd>
+        <kbd>Ctrl F</kbd>
       </button>
     </header>
   )

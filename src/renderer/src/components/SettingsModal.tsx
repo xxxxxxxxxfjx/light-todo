@@ -6,6 +6,7 @@ import {
   HardDrive,
   Info,
   Palette,
+  PawPrint,
   Power,
   RotateCcw,
   Tag as TagIcon,
@@ -13,6 +14,8 @@ import {
   X
 } from 'lucide-react'
 import { useStore } from '../store'
+import { DEFAULT_PET_SETTINGS, type PetSettings } from '@shared/pet'
+import { Mascot } from '../pet/Mascot'
 
 interface Backup {
   name: string
@@ -39,13 +42,25 @@ export function SettingsModal(): React.JSX.Element {
   const [login, setLogin] = useState(false)
   const [backups, setBackups] = useState<Backup[]>([])
   const [theme, setTheme] = useState(localStorage.getItem('lighttodo.theme') ?? 'system')
-  const [defaultView, setDefaultView] = useState(
-    localStorage.getItem('lighttodo.defaultView') ?? 'today'
-  )
+  const [defaultView, setDefaultView] = useState(() => {
+    const saved = localStorage.getItem('lighttodo.defaultView') ?? 'today'
+    return VIEWS.some((v) => v.key === saved) ? saved : 'today'
+  })
   const [reminders, setReminders] = useState(true)
   const [newTag, setNewTag] = useState('')
   const [editingTag, setEditingTag] = useState<string | null>(null)
   const [tagDraft, setTagDraft] = useState('')
+  const [pet, setPet] = useState<PetSettings>(DEFAULT_PET_SETTINGS)
+  const [petReady, setPetReady] = useState(false)
+  const [petSaving, setPetSaving] = useState(false)
+  const [section, setSection] = useState('pet')
+
+  const changePet = async (patch: Partial<PetSettings>): Promise<void> => {
+    setPetSaving(true)
+    try { setPet(await window.api.pet.setSettings(patch)) }
+    catch { showToast('桌面伙伴设置失败，请重试') }
+    finally { setPetSaving(false) }
+  }
 
   const loadBackups = (): void => {
     window.api.data.backups().then(setBackups)
@@ -56,6 +71,8 @@ export function SettingsModal(): React.JSX.Element {
     window.api.data.getLoginItem().then(setLogin)
     window.api.settings.get('reminders_enabled').then((v) => setReminders(v !== '0'))
     loadBackups()
+    window.api.pet.settings().then(value => { setPet(value); setPetReady(true) })
+    return window.api.pet.onSettings(setPet)
   }, [])
 
   const applyTheme = (t: string): void => {
@@ -63,6 +80,7 @@ export function SettingsModal(): React.JSX.Element {
     localStorage.setItem('lighttodo.theme', t)
     if (t === 'system') delete document.documentElement.dataset.theme
     else document.documentElement.dataset.theme = t
+    window.api.app.setTheme(t as 'system' | 'light' | 'dark')
   }
 
   const exportFile = async (kind: 'json' | 'md'): Promise<void> => {
@@ -93,17 +111,35 @@ export function SettingsModal(): React.JSX.Element {
   }
 
   return (
-    <div className="overlay" onMouseDown={closeSettings}>
-      <div className="settings" onMouseDown={(e) => e.stopPropagation()}>
+    <div className="overlay settings-overlay" onMouseDown={closeSettings}>
+      <div className="settings" role="dialog" aria-modal="true" aria-label="设置" onMouseDown={(e) => e.stopPropagation()}>
         <div className="settings-head">
           <span>设置</span>
-          <button className="icon-btn" onClick={closeSettings}>
+          <button className="icon-btn" aria-label="关闭设置" onClick={closeSettings}>
             <X size={16} />
           </button>
         </div>
 
+        <nav className="settings-tabs" aria-label="设置分类">
+          {[['pet', '桌面伙伴'], ['appearance', '外观与启动'], ['tags', '标签管理'], ['data', '数据与备份'], ['about', '关于']].map(([key, name]) => <button key={key} aria-current={section === key ? 'page' : undefined} className={section === key ? 'active' : ''} onClick={() => setSection(key)}>{name}</button>)}
+        </nav>
         <div className="settings-body">
-          <section className="set-section">
+          <section className="set-section pet-settings" hidden={section !== 'pet'}>
+            <div className="pet-settings-preview">
+              <Mascot skin={pet.skin}/>
+              <div><span className="pet-settings-kicker">YOUR LITTLE COMPANION</span><h2>让小可爱，陪你过好今天</h2><p>今日任务就在桌面右下角，轻轻一勾，完成一件。</p><span className="pet-settings-status">{pet.enabled ? '✦ 已开启 · 桌面置顶陪伴中' : '♡ 开启一份小小的陪伴'}</span></div>
+            </div>
+            <fieldset disabled={!petReady || petSaving} className="pet-settings-controls">
+              <div className="set-title"><PawPrint size={14}/> 桌面伙伴</div>
+              <label className="set-row clickable"><span className="set-label">开启桌宠</span><input type="checkbox" role="switch" checked={pet.enabled} onChange={e => changePet({ enabled: e.target.checked })}/><span className="set-hint">随应用启动和退出，关闭应用后不会自行重启</span></label>
+              <div className="set-row"><span className="set-label">选择伙伴</span><div className="pet-skin-options">{(['cat', 'bunny'] as const).map(skin => <button key={skin} aria-pressed={pet.skin === skin} className={pet.skin === skin ? 'active' : ''} onClick={() => changePet({ skin })}><Mascot skin={skin}/><span>{skin === 'cat' ? '奶油猫咪' : '草莓兔兔'}</span></button>)}</div></div>
+              <label className="set-row"><span className="set-label">显示大小</span><select className="set-select" value={pet.scale} onChange={e => changePet({ scale: Number(e.target.value) })}><option value="0.85">小巧 · 85%</option><option value="1">标准 · 100%</option><option value="1.15">大号 · 115%</option></select></label>
+              <label className="set-row"><span className="set-label">不透明度</span><select className="set-select" value={pet.opacity} onChange={e => changePet({ opacity: Number(e.target.value) })}>{[1, .9, .8, .65, .5].map(v => <option key={v} value={v}>{Math.round(v * 100)}%</option>)}</select></label>
+              <div className="set-row"><span className="set-label">桌面位置</span><button className="mini-btn" onClick={async () => { await window.api.pet.reset(); showToast('桌面伙伴已回到右下角') }}><RotateCcw size={12}/> 回到右下角</button><span className="set-hint">拖动伙伴可调整位置</span></div>
+            </fieldset>
+            <div className="pet-settings-note">默认只显示小宠物，鼠标移入展开今天和逾期任务，移开后收起。列表仅用滚轮滚动；拖动宠物调整位置，右键打开菜单。</div>
+          </section>
+          <section className="set-section" hidden={section !== 'appearance'}>
             <div className="set-title">
               <Palette size={14} /> 外观
             </div>
@@ -141,7 +177,7 @@ export function SettingsModal(): React.JSX.Element {
             </div>
           </section>
 
-          <section className="set-section">
+          <section className="set-section" hidden={section !== 'tags'}>
             <div className="set-title">
               <TagIcon size={14} /> 标签管理
             </div>
@@ -157,6 +193,7 @@ export function SettingsModal(): React.JSX.Element {
                       onChange={(e) => setTagDraft(e.target.value)}
                       onBlur={() => saveTag(t.id)}
                       onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return
                         if (e.key === 'Enter') saveTag(t.id)
                         if (e.key === 'Escape') setEditingTag(null)
                       }}
@@ -194,6 +231,7 @@ export function SettingsModal(): React.JSX.Element {
                   placeholder="新标签名称"
                   onChange={(e) => setNewTag(e.target.value)}
                   onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return
                     if (e.key === 'Enter') addTag()
                   }}
                 />
@@ -204,7 +242,7 @@ export function SettingsModal(): React.JSX.Element {
             </div>
           </section>
 
-          <section className="set-section">
+          <section className="set-section" hidden={section !== 'data'}>
             <div className="set-title">
               <HardDrive size={14} /> 数据
             </div>
@@ -292,7 +330,7 @@ export function SettingsModal(): React.JSX.Element {
             )}
           </section>
 
-          <section className="set-section">
+          <section className="set-section" hidden={section !== 'appearance'}>
             <div className="set-title">
               <Power size={14} /> 启动与提醒
             </div>
@@ -324,7 +362,7 @@ export function SettingsModal(): React.JSX.Element {
             </label>
           </section>
 
-          <section className="set-section">
+          <section className="set-section" hidden={section !== 'about'}>
             <div className="set-title">
               <Info size={14} /> 关于
             </div>
@@ -341,7 +379,7 @@ export function SettingsModal(): React.JSX.Element {
         </div>
 
         <div className="settings-foot">
-          <span className="set-hint">快捷键：Ctrl+Shift+Space 记一条 · Ctrl+K 搜索</span>
+          <span className="set-hint">快捷键：Ctrl+Shift+Space 记一条 · Ctrl+F 搜索</span>
           <button className="primary-btn" onClick={closeSettings}>
             完成
           </button>

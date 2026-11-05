@@ -3,7 +3,6 @@ import {
   Calendar,
   CalendarDays,
   CheckCircle2,
-  Inbox,
   Layers,
   MoreHorizontal,
   Moon,
@@ -17,7 +16,7 @@ import {
 import { useStore } from '../store'
 import type { ViewKey } from '@shared/types'
 
-const NAV: { key: ViewKey; label: string; icon: typeof Inbox }[] = [
+const NAV: { key: ViewKey; label: string; icon: typeof Sun }[] = [
   { key: 'today', label: '今天', icon: Sun },
   { key: 'upcoming', label: '最近 7 天', icon: CalendarDays },
   { key: 'calendar', label: '日历', icon: Calendar },
@@ -71,12 +70,12 @@ export function Sidebar(): React.JSX.Element {
   }
 
   const removeList = async (id: string, name: string): Promise<void> => {
-    if (!window.confirm(`删除清单「${name}」？清单里的任务会移到收件箱。`)) return
+    if (!window.confirm(`删除清单「${name}」？清单里的任务会变为未分类。`)) return
     await window.api.lists.remove(id)
     setMenuListId(null)
     await refreshSidebar()
     if (view.type === 'list' && view.listId === id) {
-      setView('inbox', { title: '收件箱' })
+      setView('all', { title: '全部' })
     }
     showToast('清单已删除')
   }
@@ -145,6 +144,7 @@ export function Sidebar(): React.JSX.Element {
                     onChange={(e) => setRenameDraft(e.target.value)}
                     onBlur={commitRename}
                     onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return
                       if (e.key === 'Enter') commitRename()
                       if (e.key === 'Escape') setRenamingId(null)
                     }}
@@ -206,6 +206,7 @@ export function Sidebar(): React.JSX.Element {
             onChange={(e) => setDraft(e.target.value)}
             onBlur={submit}
             onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return
               if (e.key === 'Enter') submit()
               if (e.key === 'Escape') setCreating(null)
             }}
@@ -230,6 +231,7 @@ export function Sidebar(): React.JSX.Element {
             onChange={(e) => setDraft(e.target.value)}
             onBlur={submit}
             onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return
               if (e.key === 'Enter') submit()
               if (e.key === 'Escape') setCreating(null)
             }}

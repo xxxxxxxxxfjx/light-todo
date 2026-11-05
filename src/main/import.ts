@@ -1,4 +1,5 @@
-import { createList, createTask, getLists, getTags, setTaskStatus } from './db.ts'
+import { createFolder, getFolders, createTag, createList, createTask, getLists, getTags, restoreTaskMetadata, restoreOccurrenceLink, setTaskStatus, transaction } from './db.ts'
+import type { Task, List, Folder, Tag } from '../shared/types'
 
 export interface ImportResult {
   ok: boolean
@@ -119,7 +120,7 @@ function ticktick(rows: string[][]): TaskDraft[] {
       scheduledDate: toDate(r[idx.due]),
       dueAt: toDateTime(r[idx.due]),
       notes: r[idx.notes] ?? '',
-      done: /1|是|完成|true/i.test(doneRaw)
+      done: /^(1|是|已完成|完成|true)$/i.test(doneRaw)
     })
   }
   return out
@@ -138,6 +139,10 @@ function todoist(rows: string[][]): TaskDraft[] {
   const out: TaskDraft[] = []
   let lastTop: TaskDraft | null = null
   for (const r of rows.slice(1)) {
+    if ((r[idx.type] ?? '').trim().toLowerCase() !== 'task') {
+      if ((r[idx.type] ?? '').trim().toLowerCase() === 'section') lastTop = null
+      continue
+    }
     const title = (r[idx.content] ?? '').trim()
     if (!title) continue
     const p = Number(r[idx.priority] ?? 4)
@@ -163,51 +168,71 @@ function generic(rows: string[][]): TaskDraft[] {
     .filter((t) => t.title)
 }
 
-export function importFromText(content: string, filename: string): ImportResult {
+function performImport(content: string, filename: string): ImportResult {
   const errors: string[] = []
   const isJson = filename.toLowerCase().endsWith('.json') || content.trim().startsWith('{')
   const result: ImportResult = { ok: false, lists: 0, tasks: 0, tags: 0, errors }
 
   try {
     if (isJson) {
-      const data = JSON.parse(content) as {
-        lists?: { name: string; color?: string | null; icon?: string | null }[]
-        tags?: { name: string }[]
-        tasks?: {
-          title: string
-          notes?: string
-          listId?: string | null
-          priority?: number
-          status?: number
-          scheduledDate?: string | null
-          dueAt?: string | null
-          tags?: { name: string }[]
-        }[]
+      const data = JSON.parse(content) as { folders?: Folder[]; lists?: List[]; tags?: Tag[]; tasks?: Task[] }
+      if (!data || !Array.isArray(data.tasks)) throw new Error('JSON 必须包含 tasks 数组')
+      for (const t of data.tasks) {
+        if (typeof t.title !== 'string' || !t.title.trim()) throw new Error('任务标题不能为空')
+      }
+      const folderIds = new Map<string, string>()
+      for (const f of data.folders ?? []) {
+        const folder = getFolders().find(x => x.name === f.name) ?? createFolder(f.name)
+        folderIds.set(f.id, folder.id)
       }
       const listIdByName = new Map<string, string>()
+      const listIds = new Map<string, string>()
       for (const l of getLists()) listIdByName.set(l.name, l.id)
       for (const l of data.lists ?? []) {
         if (!listIdByName.has(l.name)) {
           const created = createList({
             name: l.name,
             color: l.color ?? undefined,
-            icon: l.icon ?? undefined
+            icon: l.icon ?? undefined,
+            folderId: l.folderId ? folderIds.get(l.folderId) ?? null : null
           })
           listIdByName.set(l.name, created.id)
           result.lists++
         }
+        if (l.id) listIds.set(l.id, listIdByName.get(l.name)!)
       }
-      for (const t of data.tasks ?? []) {
-        createTask({
+      for (const tag of data.tags ?? []) createTag(tag.name, tag.color ?? undefined)
+      const taskIds = new Map<string, string>()
+      let pending = [...data.tasks]
+      while (pending.length) {
+        const ready = pending.filter(t => !t.parentId || taskIds.has(t.parentId))
+        if (!ready.length) throw new Error('子任务的父任务不存在或存在循环引用')
+        for (const t of ready) {
+        const created = createTask({
           title: t.title,
           notes: t.notes ?? '',
-          listId: t.listId ? (listIdByName.get(t.listId) ?? null) : null,
+          listId: t.listId ? (listIds.get(t.listId) ?? listIdByName.get(t.listId) ?? null) : null,
+          parentId: t.parentId ? taskIds.get(t.parentId) : null,
           priority: t.priority ?? 0,
+          someday: t.someday ?? (!t.scheduledDate && !t.dueAt),
           scheduledDate: t.scheduledDate ?? null,
           dueAt: t.dueAt ?? null,
+          dueAllDay: t.dueAllDay ?? 0,
+          rrule: t.rrule ?? null,
+          repeatFrom: t.repeatFrom ?? null,
+          reminderAt: t.reminderAt ?? null,
+          reminderOffset: t.reminderOffset ?? null,
           tagNames: (t.tags ?? []).map((x) => x.name)
         })
+        restoreTaskMetadata(created.id, t)
+        if (t.id) taskIds.set(t.id, created.id)
         result.tasks++
+        }
+        pending = pending.filter(t => !ready.includes(t))
+      }
+      result.tags = (data.tags ?? []).length
+      for (const t of data.tasks) {
+        if (t.id && t.nextOccurrenceId && taskIds.has(t.nextOccurrenceId)) restoreOccurrenceLink(taskIds.get(t.id)!, taskIds.get(t.nextOccurrenceId)!)
       }
       result.ok = true
       return result
@@ -258,9 +283,15 @@ export function importFromText(content: string, filename: string): ImportResult 
     result.ok = true
     return result
   } catch (e) {
-    errors.push(String(e))
-    result.message = String(e)
-    return result
+    throw e
+  }
+}
+
+export function importFromText(content: string, filename: string): ImportResult {
+  try {
+    return transaction(() => performImport(content, filename))
+  } catch (e) {
+    return { ok: false, lists: 0, tasks: 0, tags: 0, errors: [String(e)], message: String(e) }
   }
 }
 

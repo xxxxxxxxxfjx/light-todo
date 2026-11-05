@@ -199,8 +199,8 @@ await journey('flow-collect-organize-execute', [
       assert(t.status === 1, '任务未完成')
       const sub = one(db, `SELECT * FROM tasks WHERE title='收集数据'`)
       assert(sub.status === 1, '子任务未完成')
-      const inbox = q(db, `SELECT * FROM tasks WHERE list_id IS NULL AND deleted_at IS NULL AND status=0`)
-      assert(inbox.length === 4, `收件箱剩余应为 4（5 条收集 - 1 条移入工作），实际 ${inbox.length}`)
+      const unfiled = q(db, `SELECT * FROM tasks WHERE list_id IS NULL AND deleted_at IS NULL AND status=0`)
+      assert(unfiled.length === 4, `无清单任务剩余应为 4（5 条收集 - 1 条移入工作），实际 ${unfiled.length}`)
     }
   }
 ])
@@ -250,7 +250,7 @@ await journey('flow-recurring-two-rounds', [
 ])
 
 // ─────────────────────────────────────────────────────────
-// 旅程 3：清单创建 → 添加任务 → 删除清单 → 任务回落收件箱
+// 旅程 3：清单创建 → 添加任务 → 删除清单 → 任务变为未分类
 // ─────────────────────────────────────────────────────────
 await journey('flow-list-lifecycle', [
   {
@@ -272,7 +272,7 @@ await journey('flow-list-lifecycle', [
       assert(!one(db, `SELECT * FROM lists WHERE name='临时项目'`), '清单应已删除')
       const t = one(db, `SELECT * FROM tasks WHERE title='临时任务'`)
       assert(!!t, '任务不应被删除')
-      assert(t.list_id === null, `任务应回落到收件箱，实际 list_id=${t.list_id}`)
+      assert(t.list_id === null, `任务应变为未分类，实际 list_id=${t.list_id}`)
     }
   }
 ])

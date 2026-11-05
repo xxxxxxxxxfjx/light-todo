@@ -41,5 +41,7 @@ dist/
 
 .e2e-flows/
 .e2e-stress/
+.e2e-playwright/
+.tmp/
 
 .qa-*/

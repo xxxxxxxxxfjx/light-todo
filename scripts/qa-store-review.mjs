@@ -1,0 +1,54 @@
+import assert from 'node:assert/strict'
+import ts from 'typescript'
+const transpile=s=>ts.transpileModule(s,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText
+const asUrl=s=>'data:text/javascript;base64,'+Buffer.from(s).toString('base64')
+import {mkdirSync,readFileSync} from 'node:fs'
+mkdirSync('.qa-review',{recursive:true})
+const filterUrl=asUrl(transpile(readFileSync('src/renderer/src/lib/task-filter.ts','utf8')).replace("from 'date-fns'", "from '"+import.meta.resolve('date-fns')+"'"))
+const storeUrl=asUrl(transpile(readFileSync('src/renderer/src/store.ts','utf8')).replace("from 'zustand'", "from '"+import.meta.resolve('zustand')+"'").replace("from './lib/task-filter'", "from '"+filterUrl+"'"))
+const pending=[]
+globalThis.window={api:{tasks:{list:()=>new Promise(resolve=>pending.push(resolve)),get:async(id)=>({id})}}}
+const {useStore}=await import(storeUrl)
+useStore.setState({tasks:[{id:'high',priority:3},{id:'low',priority:1}],filter:'high'})
+useStore.getState().selectAll()
+assert.deepEqual(useStore.getState().selectedIds,['high'])
+let a=useStore.getState().setView('list',{listId:'A'})
+pending.shift()([{id:'A'}]);await a
+assert.deepEqual(useStore.getState().selectedIds,[]);assert.equal(useStore.getState().selectMode,false)
+a=useStore.getState().setView('today');const b=useStore.getState().setView('all')
+pending[1]([{id:'all-task'}]);await b
+pending[0]([{id:'today-task'}]);await a
+assert.equal(useStore.getState().tasks[0].id,'all-task')
+console.log('PASS 筛选全选、跨视图清空选择、乱序响应保护')
+useStore.setState({tasks:[{id:'hidden',priority:1}],filter:'high',selectedIds:['hidden']})
+await useStore.getState().batchDelete()
+console.log('PASS 批量操作不会处理隐藏目标')
+const {isOverdue}=await import(filterUrl)
+assert.equal(isOverdue({status:0,scheduledDate:'2099-01-01',dueAt:new Date(Date.now()-60000).toISOString()}),true)
+assert.equal(isOverdue({status:1,dueAt:'2000-01-01T00:00:00Z'}),false)
+console.log('PASS 逾期判定同时检查截止时间与计划日')
+
+// Calendar opening must wait for its visible range rather than requesting all history.
+pending.length=0
+useStore.setState({view:{type:'today',title:'今天'},calendarRange:null})
+await useStore.getState().setView('calendar')
+assert.equal(pending.length,0)
+a=useStore.getState().setCalendarRange('2026-11-01','2026-11-30')
+assert.equal(pending.length,1)
+pending.shift()([{id:'calendar-task'}]);await a
+await useStore.getState().setView('calendar')
+assert.equal(pending.length,0)
+assert.equal(useStore.getState().tasks[0].id,'calendar-task')
+await useStore.getState().setCalendarRange('2026-11-01','2026-11-30')
+assert.equal(pending.length,0)
+console.log('PASS 日历首次按范围加载、重复点击不清空重载、同范围不重复查询')
+
+let resolveDetail
+window.api.tasks.get=()=>new Promise(resolve=>{resolveDetail=resolve})
+useStore.setState({tasks:[{id:'instant',title:'即时详情'}]})
+const selection=useStore.getState().selectTask('instant')
+assert.equal(useStore.getState().selected.title,'即时详情')
+await useStore.getState().selectTask(null)
+resolveDetail({id:'instant',title:'迟到详情'});await selection
+assert.equal(useStore.getState().selected,null)
+console.log('PASS 详情即时显示，关闭后迟到响应不得重新弹出')

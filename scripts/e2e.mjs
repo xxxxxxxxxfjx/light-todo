@@ -122,18 +122,18 @@ await runScenario('first-run', [{ js: rows, wait: 200 }], ({ out }) => {
 })
 
 await runScenario(
-  'add-inbox',
+  'add-unfiled',
   [
     { js: `document.querySelector('.new-task').click()`, wait: 300 },
-    { js: setText('.qa-input', '收件箱新增任务'), wait: 200 },
+    { js: setText('.qa-input', '无清单新增任务'), wait: 200 },
     { js: `document.querySelector('.qa-submit').click()`, wait: 700 },
     { js: rows, wait: 100 }
   ],
   ({ out, db }) => {
-    const t = one(db, `SELECT * FROM tasks WHERE title = ?`, '收件箱新增任务')
+    const t = one(db, `SELECT * FROM tasks WHERE title = ?`, '无清单新增任务')
     assert(!!t, '任务没有写入数据库')
-    assert(t.list_id === null, '收件箱任务不应归属清单')
-    assert(out.results.at(-1).includes('收件箱新增任务'), '列表里没有显示新任务')
+    assert(t.list_id === null, '无清单任务不应归属清单')
+    assert(out.results.at(-1).includes('无清单新增任务'), '列表里没有显示新任务')
   }
 )
 
@@ -151,8 +151,8 @@ await runScenario(
     const t = one(db, `SELECT * FROM tasks WHERE title = ?`, '清单内新增任务')
     assert(!!t, '任务没有写入数据库')
     assert(t.list_id === work.id, `任务应归属工作清单，实际 list_id=${t.list_id}`)
-    const inbox = q(db, `SELECT * FROM tasks WHERE list_id IS NULL AND deleted_at IS NULL AND status = 0`)
-    assert(inbox.length === 2, `收件箱不应被污染，实际 ${inbox.length} 条`)
+    const unfiled = q(db, `SELECT * FROM tasks WHERE list_id IS NULL AND deleted_at IS NULL AND status = 0`)
+    assert(unfiled.length === 2, `无清单任务数不符，实际 ${unfiled.length} 条`)
     assert(out.results.at(-1).includes('清单内新增任务'), '工作清单视图里没有显示')
   }
 )
@@ -256,11 +256,13 @@ await runScenario(
   [
     { js: clickText('.nav-item', '日历'), wait: 800 },
     { js: `document.querySelectorAll('.cal-cell').length`, wait: 100 },
-    { js: `document.querySelectorAll('.cal-item').length`, wait: 100 }
+    { js: `document.querySelectorAll('.cal-item').length`, wait: 100 },
+    { js: `document.querySelectorAll('.agenda-row').length`, wait: 100 }
   ],
   ({ out }) => {
-    assert(out.results[1] === 42, `月历应有 42 格，实际 ${out.results[1]}`)
-    assert(out.results[2] >= 3, `日历上应有任务，实际 ${out.results[2]}`)
+    assert(out.results[1] >= 28 && out.results[1] % 7 === 0, `月历格数异常，实际 ${out.results[1]}`)
+    assert(out.results[2] >= 1, `月格应展示任务预览，实际 ${out.results[2]}`)
+    assert(out.results[3] >= 3, `当天列表应展示全部任务，实际 ${out.results[3]}`)
   }
 )
 
@@ -434,22 +436,24 @@ await runScenario(
 )
 
 await runScenario(
-  'no-inbox-nav',
+  'nav-views',
   [
     { js: `[...document.querySelectorAll('.nav-item')].map((e) => e.textContent.trim())`, wait: 100 },
     { js: clickText('.nav-item', '全部'), wait: 600 },
     { js: `document.querySelector('.new-task').click()`, wait: 300 },
-    { js: setText('.qa-input', '未安排任务'), wait: 200 },
+    { js: setText('.qa-input', '全部默认排期任务'), wait: 200 },
     { js: `document.querySelector('.qa-submit').click()`, wait: 700 },
     { js: clickText('.nav-item', '今天'), wait: 700 },
     { js: rows, wait: 100 }
   ],
   ({ out, db }) => {
     const nav = out.results[0].join('|')
-    assert(!nav.includes('收件箱'), '侧边栏不应再有收件箱: ' + nav)
-    assert(out.results.at(-1).includes('未安排任务'), '未安排任务应出现在今天视图')
-    const t = one(db, `SELECT * FROM tasks WHERE title='未安排任务'`)
-    assert(t.list_id === null && t.scheduled_date === null, '任务应为未分类未排期')
+    assert(nav.includes('今天') && nav.includes('回收站'), '侧边栏视图不完整: ' + nav)
+    assert(out.results.at(-1).includes('全部默认排期任务'), '全部默认排期任务应出现在今天视图')
+    const t = one(db, `SELECT * FROM tasks WHERE title='全部默认排期任务'`)
+    const now = new Date()
+    const expected = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    assert(t.list_id === null && t.scheduled_date === expected, `无日期新增任务应默认排到今天，实际 ${t.scheduled_date}`)
   }
 )
 
@@ -459,9 +463,9 @@ await runScenario(
     { js: clickText('.nav-item', '日历'), wait: 800 },
     {
       js: `(() => {
-        const cell = [...document.querySelectorAll('.cal-cell')].find((c) => !c.classList.contains('dim') && c.querySelector('.cal-date')?.textContent === '15');
+        const cell = [...document.querySelectorAll('.cal-cell')].find((c) => !c.classList.contains('dim') && c.querySelector('.cal-date > span')?.textContent === '15');
         if (!cell) return 'NO_CELL';
-        cell.click();
+        cell.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
         return 'CLICKED';
       })()`,
       wait: 500
@@ -486,7 +490,7 @@ await runScenario(
     { js: setText('.qa-input', '日历完成测试'), wait: 200 },
     { js: `document.querySelector('.qa-submit').click()`, wait: 700 },
     { js: clickText('.nav-item', '日历'), wait: 800 },
-    { js: clickText('.cal-item', '日历完成测试'), wait: 700 },
+    { js: clickText('.agenda-task', '日历完成测试'), wait: 700 },
     { js: `document.querySelector('.detail-title-row .check.big')?.click()`, wait: 1000 },
     { js: `[...document.querySelectorAll('.cal-item')].map((e) => e.textContent)`, wait: 100 }
   ],
@@ -623,20 +627,177 @@ await runScenario(
     { js: clickText('.nav-item', '日历'), wait: 800 },
     { js: `document.querySelector('.cal-cell.today')?.querySelectorAll('.cal-item').length`, wait: 100 },
     { js: `document.querySelector('.cal-cell.today .cal-more')?.textContent ?? ''`, wait: 100 },
-    { js: `document.querySelector('.cal-cell.today .cal-more')?.click()`, wait: 400 },
-    { js: `document.querySelectorAll('.day-row').length`, wait: 100 },
-    { js: `document.querySelector('.day-row .check')?.click()`, wait: 700 },
-    { js: `document.querySelectorAll('.day-row').length`, wait: 100 }
+    { js: `document.querySelector('.cal-cell.today')?.click()`, wait: 400 },
+    { js: `document.querySelectorAll('.agenda-row').length`, wait: 100 },
+    { js: `document.querySelector('.agenda-row .check')?.click()`, wait: 700 },
+    { js: `document.querySelectorAll('.agenda-row').length`, wait: 100 }
   ],
   ({ out, db }) => {
-    assert(out.results[2] === 3, `今天最多显示 3 条，实际 ${out.results[2]}`)
-    assert(String(out.results[3]).includes('+2'), `应显示 +2 项，实际 ${out.results[3]}`)
+    assert(out.results[2] >= 1 && out.results[2] <= 4, `月格显示条数异常，实际 ${out.results[2]}`)
+    if (out.results[2] < 5) {
+      const moreText = String(out.results[3])
+      const remaining = Number((moreText.match(/\d+/) || ['0'])[0])
+      assert(moreText.includes('还有') && out.results[2] + remaining === 5, `溢出提示条数不正确，实际 ${moreText}`)
+    }
     assert(out.results[5] === 5, `弹层应显示全部 5 条，实际 ${out.results[5]}`)
     assert(out.results[7] === 4, `完成后弹层应剩 4 条，实际 ${out.results[7]}`)
     const done = one(db, `SELECT COUNT(*) AS c FROM tasks WHERE status = 1`)
     assert(done.c === 1, `应有 1 条已完成，实际 ${done.c}`)
   }
 )
+
+// 详情面板：点击无关区域自动关闭
+await runScenario(
+  'detail-click-outside',
+  [
+    {
+      js: `(async () => {
+        const mk = async (title) => (await window.api.tasks.create({ title })).id;
+        const a = await mk('详情切换A');
+        const b = await mk('详情切换B');
+        await window.api.tasks.setStatus(a, true);
+        await window.api.tasks.setStatus(b, true);
+        return 'OK';
+      })()`,
+      wait: 700
+    },
+    { js: clickText('.nav-item', '已完成'), wait: 700 },
+    { js: `[...document.querySelectorAll('.task-row')].find((r) => r.textContent.includes('详情切换B'))?.click()`, wait: 400 },
+    { js: `document.querySelector('.detail-title')?.value ?? ''`, wait: 100 },
+    { js: `[...document.querySelectorAll('.task-row')].find((r) => r.textContent.includes('详情切换A'))?.click()`, wait: 400 },
+    { js: `document.querySelector('.detail-title')?.value ?? ''`, wait: 100 },
+    { js: `document.querySelector('.section-head')?.click()`, wait: 300 },
+    { js: `!!document.querySelector('.detail-title')`, wait: 100 }
+  ],
+  ({ out }) => {
+    assert(String(out.results[3]).includes('详情切换B'), `应打开任务 B 详情，实际 ${out.results[3]}`)
+    assert(String(out.results[5]).includes('详情切换A'), `点击另一任务应切换详情，实际 ${out.results[5]}`)
+    assert(out.results[7] === false, '点击无关区域后详情面板应关闭')
+  }
+)
+
+// 月视图：滚动到边界时加载相邻月份
+await runScenario(
+  'month-scroll',
+  [
+    { js: clickText('.nav-item', '日历'), wait: 700 },
+    { js: `document.querySelectorAll('.calendar-modes .seg')[0].click()`, wait: 700 },
+    { js: `document.querySelectorAll('[data-month-block]').length`, wait: 100 },
+    { js: `(() => { const s = document.querySelector('.month-scroll'); s.scrollTop = s.scrollHeight; return s.scrollTop })()`, wait: 900 },
+    { js: `document.querySelectorAll('[data-month-block]').length`, wait: 100 },
+    { js: `(() => { const s = document.querySelector('.month-scroll'); s.scrollTop = 0; return s.scrollTop })()`, wait: 900 },
+    { js: `document.querySelectorAll('[data-month-block]').length`, wait: 100 },
+    { js: `document.querySelector('.month-scroll')?.scrollTop ?? -1`, wait: 100 }
+  ],
+  ({ out }) => {
+    const initial = Number(out.results[2])
+    const afterBottom = Number(out.results[4])
+    const afterTop = Number(out.results[6])
+    assert(initial >= 3, `月视图初始应至少加载 3 个月，实际 ${initial}`)
+    assert(afterBottom > initial, `滚动到底部应追加月份，实际 ${initial} → ${afterBottom}`)
+    assert(afterTop > afterBottom, `滚动到顶部应补充月份，实际 ${afterBottom} → ${afterTop}`)
+    assert(Number(out.results[7]) > 0, '补充上一个月后滚动位置不应停在 0')
+  }
+)
+
+// 也许：新增任务只进入也许，不进入今天
+await runScenario(
+  'maybe-add',
+  [
+    { js: clickText('.nav-item', '也许'), wait: 700 },
+    { js: `({ filters: [...document.querySelectorAll('.filter-chip')].map((e) => e.textContent.trim()), hint: document.querySelector('.view-hint')?.textContent })`, wait: 100 },
+    { js: `document.querySelector('.main-head .ghost-btn:last-child').click()`, wait: 300 },
+    { js: setText('.qa-input', '也许回归任务'), wait: 200 },
+    { js: `document.querySelector('.qa-submit').click()`, wait: 800 },
+    { js: rows, wait: 100 },
+    { js: clickText('.nav-item', '今天'), wait: 700 },
+    { js: rows, wait: 100 }
+  ],
+  ({ out, db }) => {
+    const filters = out.results[1].filters
+    assert(JSON.stringify(filters) === JSON.stringify(['全部', '高优先级']), `也许筛选不应包含日期筛选: ${filters}`)
+    assert(String(out.results[1].hint).includes('不会进入'), '也许视图应说明不会进入今天')
+    assert(out.results[5].includes('也许回归任务'), '也许视图应显示新增任务')
+    assert(!out.results[7].includes('也许回归任务'), '也许任务不应出现在今天视图')
+    const t = one(db, `SELECT * FROM tasks WHERE title='也许回归任务'`)
+    assert(t && t.someday === 1 && t.scheduled_date === null, '也许任务应标记 someday 且无日期')
+  }
+)
+
+// 最近 7 天：无日期新增默认明天的任务
+await runScenario(
+  'upcoming-add',
+  [
+    { js: clickText('.nav-item', '最近 7 天'), wait: 700 },
+    { js: `[...document.querySelectorAll('.filter-chip')].map((e) => e.textContent.trim())`, wait: 100 },
+    { js: `document.querySelector('.main-head .ghost-btn:last-child').click()`, wait: 300 },
+    { js: setText('.qa-input', '未来回归任务'), wait: 200 },
+    { js: `document.querySelector('.qa-submit').click()`, wait: 800 },
+    { js: rows, wait: 100 }
+  ],
+  ({ out, db }) => {
+    assert(JSON.stringify(out.results[1]) === JSON.stringify(['全部', '高优先级']), '最近 7 天筛选应只保留全部和高优先级')
+    assert(out.results[5].includes('未来回归任务'), '最近 7 天视图应显示新增任务')
+    const t = one(db, `SELECT * FROM tasks WHERE title='未来回归任务'`)
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    const expected = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`
+    assert(t && t.scheduled_date === expected, `最近 7 天新增任务应默认明天，实际 ${t?.scheduled_date}`)
+  }
+)
+
+// Ctrl+F 打开搜索
+await runScenario(
+  'shortcut-search',
+  [
+    { js: `(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true })); return 'OK' })()`, wait: 300 },
+    { js: `({ search: !!document.querySelector('.search-panel'), label: document.querySelector('.titlebar-search kbd')?.textContent })`, wait: 100 }
+  ],
+  ({ out }) => {
+    assert(out.results[1].search === true, 'Ctrl+F 应打开搜索面板')
+    assert(out.results[1].label === 'Ctrl F', '搜索入口应显示 Ctrl F')
+  }
+)
+
+// 已完成 / 回收站批量删除
+await runScenario(
+  'batch-completed-trash',
+  [
+    {
+      js: `(async () => {
+        const mk = async (title) => (await window.api.tasks.create({ title })).id;
+        const a = await mk('批量已完成A');
+        const b = await mk('批量已完成B');
+        const c = await mk('回收站批量C');
+        const d = await mk('回收站批量D');
+        await window.api.tasks.setStatus(a, true);
+        await window.api.tasks.setStatus(b, true);
+        await window.api.tasks.remove(c);
+        await window.api.tasks.remove(d);
+        return 'OK';
+      })()`,
+      wait: 700
+    },
+    { js: clickText('.nav-item', '已完成'), wait: 700 },
+    { js: clickText('.head-actions .ghost-btn', '多选'), wait: 300 },
+    { js: `document.querySelector('.bulk-bar .mini-btn')?.click()`, wait: 300 },
+    { js: `[...document.querySelectorAll('.bulk-bar .mini-btn')].find((b) => b.textContent.trim() === '删除')?.click()`, wait: 900 },
+    { js: `document.querySelectorAll('.task-row').length`, wait: 100 },
+    { js: clickText('.nav-item', '回收站'), wait: 700 },
+    { js: clickText('.head-actions .ghost-btn', '多选'), wait: 300 },
+    { js: `document.querySelector('.bulk-bar .mini-btn')?.click()`, wait: 300 },
+    { js: `(() => { window.confirm = () => true; return 'OK' })()`, wait: 50 },
+    { js: `[...document.querySelectorAll('.bulk-bar .mini-btn')].find((b) => b.textContent.trim() === '彻底删除')?.click()`, wait: 900 },
+    { js: `document.querySelectorAll('.trash-row').length`, wait: 100 }
+  ],
+  ({ out, db }) => {
+    assert(out.results[5] === 0, `已完成批量删除后应为空，实际 ${out.results[5]}`)
+    assert(out.results[11] === 0, `回收站批量彻底删除后应为空，实际 ${out.results[11]}`)
+    const rows = q(db, `SELECT * FROM tasks WHERE title LIKE '批量已完成%' OR title LIKE '回收站批量%'`)
+    assert(rows.length === 0, `批量删除的任务应已彻底移除，实际 ${rows.length} 条`)
+  }
+)
+
 
 // 持久化：两次启动同一数据目录
 if (!only || only === 'persistence') {

@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   notes          TEXT NOT NULL DEFAULT '',
   priority       INTEGER NOT NULL DEFAULT 0,
   status         INTEGER NOT NULL DEFAULT 0,
+  someday        INTEGER NOT NULL DEFAULT 0,
   scheduled_date TEXT,
   due_at         TEXT,
   due_all_day    INTEGER NOT NULL DEFAULT 0,
@@ -119,6 +120,21 @@ export function initDb(dir: string): void {
   db.exec(SCHEMA)
   ensureColumn('tasks', 'reminder_offset', 'INTEGER')
   ensureColumn('tasks', 'notified_at', 'TEXT')
+  ensureColumn('tasks', 'next_occurrence_id', 'TEXT')
+  const hadSomeday = conn()
+    .prepare('PRAGMA table_info(tasks)')
+    .all()
+    .some((column) => (column as { name: string }).name === 'someday')
+  ensureColumn('tasks', 'someday', 'INTEGER NOT NULL DEFAULT 0')
+  if (!hadSomeday) {
+    // 旧版本把无日期任务同时放在「今天」和「也许」；升级后归入也许，避免继续污染今天。
+    conn()
+      .prepare(
+        `UPDATE tasks SET someday = 1
+         WHERE scheduled_date IS NULL AND due_at IS NULL AND deleted_at IS NULL AND parent_id IS NULL`
+      )
+      .run()
+  }
   seedIfEmpty()
 }
 
@@ -133,6 +149,31 @@ export function closeDb(): void {
 
 function nowIso(): string {
   return new Date().toISOString()
+}
+
+// Savepoints also work when an import or another operation already owns a transaction.
+let transactionId = 0
+export function transaction<T>(action: () => T): T {
+  const name = `operation_${++transactionId}`
+  conn().exec(`SAVEPOINT ${name}`)
+  try {
+    const result = action()
+    conn().exec(`RELEASE ${name}`)
+    return result
+  } catch (error) {
+    conn().exec(`ROLLBACK TO ${name}; RELEASE ${name}`)
+    throw error
+  }
+}
+
+export function restoreTaskMetadata(id: string, data: Partial<Task>): void {
+  conn().prepare(`UPDATE tasks SET status=?, completed_at=?, created_at=?, updated_at=?,
+    sort_order=?, notified_at=? WHERE id=?`).run(data.status ?? 0, data.completedAt ?? null,
+    data.createdAt ?? nowIso(), data.updatedAt ?? nowIso(), data.sortOrder ?? 0, data.notifiedAt ?? null, id)
+}
+
+export function restoreOccurrenceLink(id: string, nextId: string): void {
+  conn().prepare('UPDATE tasks SET next_occurrence_id=? WHERE id=?').run(nextId, id)
 }
 
 function ensureColumn(table: string, column: string, type: string): void {
@@ -230,6 +271,7 @@ function mapTask(r: Record<string, unknown>): Task {
     notes: (r.notes as string) ?? '',
     priority: Number(r.priority ?? 0),
     status: Number(r.status ?? 0),
+    someday: Number(r.someday ?? 0) === 1,
     scheduledDate: (r.scheduled_date as string) ?? null,
     dueAt: (r.due_at as string) ?? null,
     dueAllDay: Number(r.due_all_day ?? 0),
@@ -247,6 +289,7 @@ function mapTask(r: Record<string, unknown>): Task {
     createdAt: r.created_at as string,
     updatedAt: r.updated_at as string,
     tags: r.tags_json ? (JSON.parse(r.tags_json as string) as Tag[]) : [],
+    nextOccurrenceId: (r.next_occurrence_id as string) ?? null,
     subtaskCount: Number(r.subtask_count ?? 0),
     subtaskDone: Number(r.subtask_done ?? 0)
   }
@@ -257,6 +300,9 @@ export function listTasks(opts: {
   listId?: string
   tagId?: string
   limit?: number
+  offset?: number
+  dateFrom?: string
+  dateTo?: string
 }): Task[] {
   const now = new Date()
   const today = dayStr(now)
@@ -271,25 +317,22 @@ export function listTasks(opts: {
   let limit = opts.limit ?? 1000
 
   switch (opts.view) {
-    case 'inbox':
-      where += ' AND t.status = 0 AND t.list_id IS NULL'
-      break
     case 'today':
       where +=
-        ' AND t.status = 0 AND ((t.scheduled_date IS NOT NULL AND t.scheduled_date <= ?) OR (t.due_at IS NOT NULL AND t.due_at < ?) OR (t.scheduled_date IS NULL AND t.due_at IS NULL AND t.list_id IS NULL))'
+        ' AND t.status = 0 AND t.someday = 0 AND ((t.scheduled_date IS NOT NULL AND t.scheduled_date <= ?) OR (t.due_at IS NOT NULL AND t.due_at < ?) OR (t.scheduled_date IS NULL AND t.due_at IS NULL AND t.list_id IS NULL))'
       params.push(today, tomorrowStart)
       order = `CASE WHEN (t.due_at IS NOT NULL AND t.due_at < '${now.toISOString()}') OR (t.scheduled_date IS NOT NULL AND t.scheduled_date < '${today}') THEN 0 ELSE 1 END, t.sort_order ASC, t.created_at DESC`
       break
     case 'upcoming':
       where +=
-        ' AND t.status = 0 AND ((t.scheduled_date IS NOT NULL AND t.scheduled_date > ? AND t.scheduled_date <= ?) OR (t.due_at IS NOT NULL AND t.due_at >= ? AND t.due_at < ?))'
+        ' AND t.status = 0 AND t.someday = 0 AND ((t.scheduled_date IS NOT NULL AND t.scheduled_date > ? AND t.scheduled_date <= ?) OR (t.due_at IS NOT NULL AND t.due_at >= ? AND t.due_at < ?))'
       params.push(today, in7, tomorrowStart, in8Start)
       break
     case 'all':
       where += ' AND t.status = 0'
       break
     case 'someday':
-      where += ' AND t.status = 0 AND t.scheduled_date IS NULL AND t.due_at IS NULL'
+      where += ' AND t.status = 0 AND t.someday = 1'
       break
     case 'completed':
       where += ' AND t.status = 1'
@@ -302,7 +345,15 @@ export function listTasks(opts: {
       limit = opts.limit ?? 300
       break
     case 'calendar':
-      where += ' AND t.status = 0'
+      if (opts.dateFrom && opts.dateTo) {
+        const [fy, fm, fd] = opts.dateFrom.split('-').map(Number)
+        const [ty, tm, td] = opts.dateTo.split('-').map(Number)
+        const from = new Date(fy, fm - 1, fd).toISOString()
+        const until = new Date(ty, tm - 1, td + 1).toISOString()
+        // Match CalendarView's precedence: planned day, otherwise local due day.
+        where += ' AND ((t.scheduled_date BETWEEN ? AND ?) OR (t.scheduled_date IS NULL AND t.due_at >= ? AND t.due_at < ?))'
+        params.push(opts.dateFrom, opts.dateTo, from, until)
+      }
       break
     case 'list':
       where += ' AND t.status = 0 AND t.list_id = ?'
@@ -316,8 +367,9 @@ export function listTasks(opts: {
   }
 
   const sql = `SELECT t.*, ${TAGS_SUBQUERY}, ${SUBTASK_COUNTS}
-    FROM tasks t WHERE ${where} ORDER BY ${order} LIMIT ?`
+    FROM tasks t WHERE ${where} ORDER BY ${order}, t.id LIMIT ? OFFSET ?`
   params.push(limit)
+  params.push(opts.offset ?? 0)
   const rows = conn().prepare(sql).all(...(params as never[])) as Record<string, unknown>[]
   return rows.map(mapTask)
 }
@@ -380,6 +432,7 @@ function ensureTags(names: string[]): string[] {
 }
 
 export function createTask(input: CreateTaskInput): Task {
+  if (typeof input.title !== 'string' || !input.title.trim()) throw new Error('任务标题不能为空')
   const id = randomUUID()
   const now = nowIso()
   let listId = input.listId ?? null
@@ -390,13 +443,14 @@ export function createTask(input: CreateTaskInput): Task {
     if (parent) listId = parent.list_id
   }
   const offset = input.reminderOffset ?? null
+  const someday = input.someday && !input.scheduledDate && !input.dueAt ? 1 : 0
   const reminderAt =
     input.reminderAt ??
     reminderTime(input.dueAt ?? null, input.scheduledDate ?? null, offset)
   conn()
     .prepare(
-      `INSERT INTO tasks (id,list_id,parent_id,title,notes,priority,status,scheduled_date,due_at,due_all_day,rrule,repeat_from,reminder_at,reminder_offset,notified_at,created_at,updated_at,sort_order)
-       VALUES (?,?,?,?,?,?,0,?,?,?,?,?,?,?,NULL,?,?,?)`
+      `INSERT INTO tasks (id,list_id,parent_id,title,notes,priority,status,someday,scheduled_date,due_at,due_all_day,rrule,repeat_from,reminder_at,reminder_offset,notified_at,created_at,updated_at,sort_order)
+       VALUES (?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,NULL,?,?,?)`
     )
     .run(
       id,
@@ -405,6 +459,7 @@ export function createTask(input: CreateTaskInput): Task {
       input.title.trim(),
       input.notes ?? '',
       input.priority ?? 0,
+      someday,
       input.scheduledDate ?? null,
       input.dueAt ?? null,
       input.dueAllDay ?? 0,
@@ -425,6 +480,11 @@ export function createTask(input: CreateTaskInput): Task {
 }
 
 export function updateTask(id: string, patch: UpdateTaskInput): Task {
+  return transaction(() => applyTaskUpdate(id, patch))
+}
+
+function applyTaskUpdate(id: string, patch: UpdateTaskInput): Task {
+  if (patch.title !== undefined && !patch.title.trim()) throw new Error('任务标题不能为空')
   const fields: string[] = []
   const params: unknown[] = []
   const set = (col: string, val: unknown): void => {
@@ -436,8 +496,11 @@ export function updateTask(id: string, patch: UpdateTaskInput): Task {
   if (patch.notes !== undefined) set('notes', patch.notes)
   if (patch.listId !== undefined) set('list_id', patch.listId)
   if (patch.priority !== undefined) set('priority', patch.priority)
+  if (patch.someday !== undefined) set('someday', patch.someday ? 1 : 0)
   if (patch.scheduledDate !== undefined) set('scheduled_date', patch.scheduledDate)
   if (patch.dueAt !== undefined) set('due_at', patch.dueAt)
+  if (patch.scheduledDate) set('someday', 0)
+  if (patch.dueAt) set('someday', 0)
   if (patch.dueAllDay !== undefined) set('due_all_day', patch.dueAllDay)
   if (patch.rrule !== undefined) set('rrule', patch.rrule)
   if (patch.repeatFrom !== undefined) set('repeat_from', patch.repeatFrom)
@@ -470,6 +533,14 @@ export function updateTask(id: string, patch: UpdateTaskInput): Task {
     .prepare(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`)
     .run(...(params as never[]))
 
+  if (patch.listId !== undefined) {
+    conn().prepare(`WITH RECURSIVE children(id) AS (
+      SELECT id FROM tasks WHERE parent_id = ? UNION ALL
+      SELECT t.id FROM tasks t JOIN children c ON t.parent_id=c.id
+    ) UPDATE tasks SET list_id=?, updated_at=? WHERE id IN (SELECT id FROM children)`)
+      .run(id, patch.listId, nowIso())
+  }
+
   if (patch.tagNames !== undefined) {
     conn().prepare('DELETE FROM task_tags WHERE task_id = ?').run(id)
     const tagIds = ensureTags(patch.tagNames)
@@ -480,6 +551,10 @@ export function updateTask(id: string, patch: UpdateTaskInput): Task {
 }
 
 export function setTaskStatus(id: string, done: boolean): void {
+  transaction(() => changeTaskStatus(id, done))
+}
+
+function changeTaskStatus(id: string, done: boolean): void {
   const task = getTask(id)
   if (!task) return
   if (done && task.status === 0 && task.rrule) {
@@ -500,11 +575,16 @@ export function setTaskStatus(id: string, done: boolean): void {
   }
   if (done) {
     conn0.prepare('UPDATE tasks SET reminder_at = NULL WHERE id = ?').run(id)
+  } else {
+    conn0.prepare('UPDATE tasks SET reminder_at = ?, notified_at = NULL WHERE id = ?')
+      .run(reminderTime(task.dueAt, task.scheduledDate, task.reminderOffset), id)
   }
 }
 
 function spawnNextOccurrence(task: Task): void {
-  try {
+    const existing = conn().prepare('SELECT next_occurrence_id FROM tasks WHERE id=?').get(task.id) as { next_occurrence_id: string | null }
+    // Completion can be undone; each source occurrence can create its successor only once.
+    if (existing.next_occurrence_id) return
     let base: Date | null = null
     if (task.repeatFrom === 'completion') {
       base = new Date()
@@ -540,12 +620,10 @@ function spawnNextOccurrence(task: Task): void {
       reminderOffset: task.reminderOffset,
       tagNames: task.tags.map((t) => t.name)
     })
+    conn().prepare('UPDATE tasks SET next_occurrence_id=? WHERE id=?').run(created.id, task.id)
     for (const sub of task.subtasks ?? []) {
-      createTask({ title: sub.title, parentId: created.id, priority: sub.priority })
+      createTask({ title: sub.title, notes: sub.notes, parentId: created.id, priority: sub.priority, tagNames: sub.tags.map(t => t.name) })
     }
-  } catch (e) {
-    console.error('spawnNextOccurrence failed', e)
-  }
 }
 
 export function getDueReminders(nowIsoStr: string): Task[] {
@@ -763,14 +841,13 @@ export function getSidebar(): SidebarData {
   }
 
   const counts: Record<string, number> = {
-    inbox: count('SELECT COUNT(*) AS c FROM tasks WHERE deleted_at IS NULL AND parent_id IS NULL AND status=0 AND list_id IS NULL'),
     today: count(
-      'SELECT COUNT(*) AS c FROM tasks WHERE deleted_at IS NULL AND parent_id IS NULL AND status=0 AND ((scheduled_date IS NOT NULL AND scheduled_date <= ?) OR (due_at IS NOT NULL AND due_at < ?) OR (scheduled_date IS NULL AND due_at IS NULL AND list_id IS NULL))',
+      'SELECT COUNT(*) AS c FROM tasks WHERE deleted_at IS NULL AND parent_id IS NULL AND status=0 AND someday=0 AND ((scheduled_date IS NOT NULL AND scheduled_date <= ?) OR (due_at IS NOT NULL AND due_at < ?) OR (scheduled_date IS NULL AND due_at IS NULL AND list_id IS NULL))',
       today,
       tomorrowStart
     ),
     upcoming: count(
-      'SELECT COUNT(*) AS c FROM tasks WHERE deleted_at IS NULL AND parent_id IS NULL AND status=0 AND ((scheduled_date IS NOT NULL AND scheduled_date > ? AND scheduled_date <= ?) OR (due_at IS NOT NULL AND due_at >= ? AND due_at < ?))',
+      'SELECT COUNT(*) AS c FROM tasks WHERE deleted_at IS NULL AND parent_id IS NULL AND status=0 AND someday=0 AND ((scheduled_date IS NOT NULL AND scheduled_date > ? AND scheduled_date <= ?) OR (due_at IS NOT NULL AND due_at >= ? AND due_at < ?))',
       today,
       in7,
       tomorrowStart,
@@ -778,7 +855,7 @@ export function getSidebar(): SidebarData {
     ),
     all: count('SELECT COUNT(*) AS c FROM tasks WHERE deleted_at IS NULL AND parent_id IS NULL AND status=0'),
     someday: count(
-      'SELECT COUNT(*) AS c FROM tasks WHERE deleted_at IS NULL AND parent_id IS NULL AND status=0 AND scheduled_date IS NULL AND due_at IS NULL'
+      'SELECT COUNT(*) AS c FROM tasks WHERE deleted_at IS NULL AND parent_id IS NULL AND status=0 AND someday=1'
     ),
     completed: count('SELECT COUNT(*) AS c FROM tasks WHERE deleted_at IS NULL AND parent_id IS NULL AND status=1'),
     trash: count('SELECT COUNT(*) AS c FROM tasks WHERE deleted_at IS NOT NULL AND parent_id IS NULL')

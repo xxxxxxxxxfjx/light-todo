@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CalendarDays, Check, Flag, ListTodo, Plus, Repeat, Trash2, X } from 'lucide-react'
+import { CalendarDays, Check, Flag, ListTodo, Moon, Plus, Repeat, Trash2, X } from 'lucide-react'
 import { useStore } from '../store'
 import { humanDate, isoToLocalInput, localInputToIso, todayStr } from '../lib/format'
 import type { Task } from '@shared/types'
+import { repeatLabel } from '../lib/repeat'
 
 function Field({
   label,
@@ -35,6 +36,7 @@ export function DetailPanel(): React.JSX.Element {
   const notesRef = useRef<HTMLTextAreaElement>(null)
   const [tagText, setTagText] = useState('')
   const [subDraft, setSubDraft] = useState('')
+  const addingSubtask = useRef(false)
 
   useEffect(() => {
     setTitle(selected?.title ?? '')
@@ -64,12 +66,16 @@ export function DetailPanel(): React.JSX.Element {
 
   const addSubtask = async (): Promise<void> => {
     const t = subDraft.trim()
-    if (!t) return
+    if (!t || addingSubtask.current) return
+    addingSubtask.current = true
+    try {
     await window.api.tasks.create({ title: t, parentId: task.id })
     setSubDraft('')
     await selectTask(task.id)
     await refresh()
     await refreshSidebar()
+    } catch (error) { useStore.getState().showToast(`添加子任务失败：${String(error)}`) }
+    finally { addingSubtask.current = false }
   }
 
   return (
@@ -96,6 +102,7 @@ export function DetailPanel(): React.JSX.Element {
             onChange={(e) => setTitle(e.target.value)}
             onBlur={saveTitle}
             onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
                 ;(e.target as HTMLTextAreaElement).blur()
@@ -182,6 +189,7 @@ export function DetailPanel(): React.JSX.Element {
               onChange={(e) => setTagText(e.target.value)}
               onBlur={saveTags}
               onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return
                 if (e.key === 'Enter') {
                   e.preventDefault()
                   ;(e.target as HTMLInputElement).blur()
@@ -189,16 +197,41 @@ export function DetailPanel(): React.JSX.Element {
               }}
             />
           </Field>
+          <Field label="重复">
+            <select aria-label="重复频率" value={task.rrule ?? ''} onChange={e => updateTask(task.id, {
+              rrule: e.target.value || null,
+              ...(e.target.value && !task.scheduledDate && !task.dueAt ? {scheduledDate:todayStr()} : {})
+            })}>
+              <option value="">不重复</option>
+              {['FREQ=DAILY','FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR','FREQ=WEEKLY','FREQ=MONTHLY','FREQ=YEARLY'].map(rule => <option key={rule} value={rule}>{repeatLabel(rule)}</option>)}
+              {task.rrule && !['FREQ=DAILY','FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR','FREQ=WEEKLY','FREQ=MONTHLY','FREQ=YEARLY'].includes(task.rrule) && <option value={task.rrule}>{repeatLabel(task.rrule)}</option>}
+            </select>
+          </Field>
+          {task.rrule && <Field label="重复方式"><select aria-label="重复方式" value={task.repeatFrom ?? 'due'} onChange={e => updateTask(task.id,{repeatFrom:e.target.value as 'due' | 'completion'})}><option value="due">按计划日期</option><option value="completion">按完成日期</option></select></Field>}
         </div>
 
-        {!task.scheduledDate && (
-          <button
-            className="inline-action"
-            onClick={() => updateTask(task.id, { scheduledDate: todayStr() })}
-          >
-            <CalendarDays size={14} /> 安排到今天
-          </button>
-        )}
+        <div className="detail-quick-actions">
+          {(!task.scheduledDate || task.someday) && (
+            <button
+              className="inline-action"
+              onClick={() => updateTask(task.id, { scheduledDate: todayStr(), someday: false })}
+            >
+              <CalendarDays size={14} /> 安排到今天
+            </button>
+          )}
+          {task.someday ? (
+            <span className="someday-state"><Moon size={13}/> 已在也许</span>
+          ) : (
+            <button
+              className="inline-action"
+              onClick={() =>
+                updateTask(task.id, { someday: true, scheduledDate: null, dueAt: null })
+              }
+            >
+              <Moon size={14} /> 移到也许
+            </button>
+          )}
+        </div>
 
         <div className="detail-section">
           <div className="detail-section-head">
@@ -234,6 +267,7 @@ export function DetailPanel(): React.JSX.Element {
                 placeholder="添加子任务，回车保存"
                 onChange={(e) => setSubDraft(e.target.value)}
                 onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return
                   if (e.key === 'Enter') addSubtask()
                 }}
               />
@@ -261,7 +295,7 @@ export function DetailPanel(): React.JSX.Element {
         {task.rrule && (
           <div className="repeat-badge">
             <Repeat size={13} />
-            <span>重复规则：{task.rrule}</span>
+            <span>{repeatLabel(task.rrule)} · {task.repeatFrom === 'completion' ? '按完成日期' : '按计划日期'}</span>
           </div>
         )}
       </div>
@@ -321,7 +355,7 @@ function Overview(): React.JSX.Element {
               输入 <code>明天下午3点 交周报 #工作 @汇报 !高</code>
             </li>
             <li>
-              <kbd>Space</kbd> 完成选中任务，<kbd>Ctrl</kbd> + <kbd>K</kbd> 搜索
+              <kbd>Space</kbd> 完成选中任务，<kbd>Ctrl</kbd> + <kbd>F</kbd> 搜索
             </li>
           </ul>
         </div>

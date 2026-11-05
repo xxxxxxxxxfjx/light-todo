@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { PetSettings } from '../shared/pet'
 import type {
   CreateTaskInput,
   UpdateTaskInput,
@@ -6,7 +7,28 @@ import type {
 } from '../shared/types'
 
 const api = {
+  pet: {
+    settings: (): Promise<PetSettings> => ipcRenderer.invoke('pet:settings'),
+    setSettings: (patch: Partial<PetSettings>): Promise<PetSettings> => ipcRenderer.invoke('pet:setSettings', patch),
+    reset: (): Promise<void> => ipcRenderer.invoke('pet:reset'),
+    onSettings: (cb: (settings: PetSettings) => void) => {
+      const listener = (_e: unknown, settings: PetSettings): void => cb(settings)
+      ipcRenderer.on('pet:settings', listener)
+      return (): void => { ipcRenderer.removeListener('pet:settings', listener) }
+    }
+  },
+  onTasksChanged: (cb: () => void) => {
+    const listener = (): void => cb()
+    ipcRenderer.on('tasks:changed', listener)
+    return (): void => { ipcRenderer.removeListener('tasks:changed', listener) }
+  },
+  onSettings: (cb: () => void) => {
+    const listener = (): void => cb()
+    ipcRenderer.on('ui:settings', listener)
+    return (): void => { ipcRenderer.removeListener('ui:settings', listener) }
+  },
   app: {
+    setTheme: (theme: 'system' | 'light' | 'dark') => ipcRenderer.invoke('app:setTheme', theme),
     info: () => ipcRenderer.invoke('app:info'),
     openDataDir: () => ipcRenderer.invoke('app:openDataDir')
   },
@@ -14,7 +36,7 @@ const api = {
     get: () => ipcRenderer.invoke('sidebar:get')
   },
   tasks: {
-    list: (opts: { view: ViewKey; listId?: string; tagId?: string; limit?: number }) =>
+    list: (opts: { view: ViewKey; listId?: string; tagId?: string; limit?: number; offset?: number; dateFrom?: string; dateTo?: string }) =>
       ipcRenderer.invoke('tasks:list', opts),
     get: (id: string) => ipcRenderer.invoke('tasks:get', id),
     create: (input: CreateTaskInput) => ipcRenderer.invoke('tasks:create', input),

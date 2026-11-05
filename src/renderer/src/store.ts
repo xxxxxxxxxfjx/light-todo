@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import type { CreateTaskInput, SidebarData, Task, UpdateTaskInput, ViewKey } from '@shared/types'
+import { matchFilter, type TaskFilter } from './lib/task-filter'
+export type { TaskFilter } from './lib/task-filter'
 
 export interface ViewState {
   type: ViewKey
@@ -8,7 +10,6 @@ export interface ViewState {
   title: string
 }
 
-export type TaskFilter = 'all' | 'overdue' | 'today' | 'high' | 'nodate'
 
 const EMPTY_SIDEBAR: SidebarData = { folders: [], lists: [], tags: [], counts: {} }
 
@@ -17,7 +18,15 @@ interface AppStore {
   tasks: Task[]
   selected: Task | null
   sidebar: SidebarData
+  sidebarOpen: boolean
+  toggleSidebar: () => void
+  closeSidebar: () => void
   loading: boolean
+  error: string
+  hasMore: boolean
+  calendarRange: { from: string; to: string } | null
+  setCalendarRange: (from: string, to: string) => Promise<void>
+  loadMore: () => Promise<void>
   filter: TaskFilter
   quickAddOpen: boolean
   quickAddInitial: string
@@ -45,6 +54,8 @@ interface AppStore {
   clearSelection: () => void
   batchComplete: () => Promise<void>
   batchDelete: () => Promise<void>
+  batchRestore: () => Promise<void>
+  batchPurge: () => Promise<void>
   openQuickAdd: (text?: string, date?: string) => void
   closeQuickAdd: () => void
   openSearch: () => void
@@ -55,13 +66,27 @@ interface AppStore {
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null
+let refreshId = 0
+let selectionId = 0
 
 export const useStore = create<AppStore>((set, get) => ({
   view: { type: 'today', title: '今天' },
   tasks: [],
   selected: null,
   sidebar: EMPTY_SIDEBAR,
+  sidebarOpen: false,
+  toggleSidebar: () => set({ sidebarOpen: !get().sidebarOpen }),
+  closeSidebar: () => set({ sidebarOpen: false }),
   loading: false,
+  error: '',
+  hasMore: false,
+  calendarRange: null,
+  setCalendarRange: async (from, to) => {
+    const previous = get().calendarRange
+    if (previous?.from === from && previous.to === to) return
+    set({ calendarRange: { from, to } })
+    if (get().view.type === 'calendar') await get().refresh()
+  },
   filter: 'all',
   quickAddOpen: false,
   quickAddInitial: '',
@@ -72,13 +97,13 @@ export const useStore = create<AppStore>((set, get) => ({
   settingsOpen: false,
   toast: '',
 
-  setFilter: (filter) => set({ filter }),
+  setFilter: (filter) => set({ filter, selectedIds: [] }),
 
   setView: async (type, opts) => {
+    if (type === 'calendar' && get().view.type === 'calendar') return
     const title =
       opts?.title ??
       ({
-        inbox: '收件箱',
         today: '今天',
         upcoming: '最近 7 天',
         all: '全部',
@@ -89,23 +114,47 @@ export const useStore = create<AppStore>((set, get) => ({
         list: '清单',
         tag: '标签'
       } as Record<ViewKey, string>)[type]
-    set({ view: { type, ...opts, title }, selected: null, filter: 'all' })
+    selectionId++
+    set({ view: { type, ...opts, title }, tasks: [], selected: null, filter: 'all', selectedIds: [], selectMode: false, sidebarOpen: false })
     await get().refresh()
   },
 
   refresh: async () => {
-    const { view } = get()
-    set({ loading: true })
+    const { view, calendarRange } = get()
+    const request = ++refreshId
+    // The mounted calendar supplies its visible range. Never load the entire
+    // historical database while waiting for that first range.
+    if (view.type === 'calendar' && !calendarRange) {
+      set({ loading: true, error: '' })
+      return
+    }
+    const limit = view.type === 'calendar' ? -1 : Math.max(get().tasks.length, 1000)
+    set({ loading: true, error: '' })
     try {
       const tasks = await window.api.tasks.list({
         view: view.type,
         listId: view.listId,
-        tagId: view.tagId
+        tagId: view.tagId,
+        limit,
+        ...(view.type === 'calendar' && calendarRange ? { dateFrom: calendarRange.from, dateTo: calendarRange.to } : {})
       })
-      set({ tasks, loading: false })
+      if (request === refreshId) set({ tasks, loading: false, hasMore: limit > 0 && tasks.length === limit })
     } catch (e) {
       console.error(e)
-      set({ loading: false })
+      if (request === refreshId) set({ loading: false, error: '任务加载失败，请重试' })
+    }
+  },
+
+  loadMore: async () => {
+    if (get().loading) return
+    const { view, tasks } = get()
+    const request = ++refreshId
+    set({ loading: true, error: '' })
+    try {
+      const more = await window.api.tasks.list({ view: view.type, listId: view.listId, tagId: view.tagId, limit: 1000, offset: tasks.length })
+      if (request === refreshId) set({ tasks: [...tasks, ...more], loading: false, hasMore: more.length === 1000 })
+    } catch {
+      if (request === refreshId) set({ loading: false, error: '更多任务加载失败，请重试' })
     }
   },
 
@@ -119,17 +168,21 @@ export const useStore = create<AppStore>((set, get) => ({
   },
 
   selectTask: async (id) => {
+    const request = ++selectionId
     if (!id) {
       set({ selected: null })
       return
     }
+    const cached = get().tasks.find(task => task.id === id)
+    if (cached) set({ selected: cached })
     const task = await window.api.tasks.get(id)
-    set({ selected: task })
+    if (request === selectionId) set({ selected: task })
   },
 
   selectTaskById: async (id) => {
+    const request = ++selectionId
     const task = await window.api.tasks.get(id)
-    set({ selected: task, searchOpen: false })
+    if (request === selectionId) set({ selected: task, searchOpen: false })
   },
 
   toggleTask: async (id) => {
@@ -181,11 +234,11 @@ export const useStore = create<AppStore>((set, get) => ({
     const ids = get().selectedIds
     set({ selectedIds: ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id] })
   },
-  selectAll: () => set({ selectedIds: get().tasks.map((t) => t.id) }),
+  selectAll: () => set({ selectedIds: get().tasks.filter(t => matchFilter(t, get().filter)).map((t) => t.id) }),
   clearSelection: () => set({ selectedIds: [], selectMode: false }),
 
   batchComplete: async () => {
-    const ids = get().selectedIds
+    const ids = get().selectedIds.filter(id => get().tasks.some(t => t.id === id && matchFilter(t, get().filter)))
     if (!ids.length) return
     for (const id of ids) await window.api.tasks.setStatus(id, true)
     set({ selectedIds: [], selectMode: false })
@@ -194,13 +247,32 @@ export const useStore = create<AppStore>((set, get) => ({
   },
 
   batchDelete: async () => {
-    const ids = get().selectedIds
+    const ids = get().selectedIds.filter(id => get().tasks.some(t => t.id === id && matchFilter(t, get().filter)))
     if (!ids.length) return
     for (const id of ids) await window.api.tasks.remove(id)
     if (get().selected && ids.includes(get().selected!.id)) set({ selected: null })
     set({ selectedIds: [], selectMode: false })
     await Promise.all([get().refresh(), get().refreshSidebar()])
     get().showToast(`已删除 ${ids.length} 项`)
+  },
+
+  batchRestore: async () => {
+    const ids = get().selectedIds.filter(id => get().tasks.some(t => t.id === id && matchFilter(t, get().filter)))
+    if (!ids.length) return
+    for (const id of ids) await window.api.tasks.restore(id)
+    set({ selectedIds: [], selectMode: false })
+    await Promise.all([get().refresh(), get().refreshSidebar()])
+    get().showToast(`已恢复 ${ids.length} 项`)
+  },
+
+  batchPurge: async () => {
+    const ids = get().selectedIds.filter(id => get().tasks.some(t => t.id === id && matchFilter(t, get().filter)))
+    if (!ids.length) return
+    for (const id of ids) await window.api.tasks.purge(id)
+    if (get().selected && ids.includes(get().selected!.id)) set({ selected: null })
+    set({ selectedIds: [], selectMode: false })
+    await Promise.all([get().refresh(), get().refreshSidebar()])
+    get().showToast(`已彻底删除 ${ids.length} 项`)
   },
 
   openQuickAdd: (text = '', date) =>

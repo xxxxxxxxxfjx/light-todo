@@ -12,6 +12,7 @@ export default defineConfig({
     }
   },
   preload: {
+    build: { rollupOptions: { input: { index: resolve('src/preload/index.ts'), pet: resolve('src/preload/pet.ts') } } },
     plugins: [externalizeDepsPlugin()],
     resolve: {
       alias: {
@@ -20,6 +21,7 @@ export default defineConfig({
     }
   },
   renderer: {
+    build: { rollupOptions: { input: { index: resolve('src/renderer/index.html'), pet: resolve('src/renderer/pet.html') } } },
     resolve: {
       alias: {
         '@renderer': resolve('src/renderer/src'),
