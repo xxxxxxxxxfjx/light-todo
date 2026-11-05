@@ -85,6 +85,72 @@ CREATE TABLE IF NOT EXISTS task_tags (
 );
 CREATE INDEX IF NOT EXISTS idx_task_tags_tag ON task_tags(tag_id);
 
+-- 搜索索引：独立 FTS5 表（非 external content），rowid 由 FTS 自己管理，
+-- task_id 只是普通列，避免 external-content 的 rowid 映射问题。
+-- trigram 分词对中英文都按 3 字符片段匹配；少于 3 字符的查询由 LIKE 兜底。
+CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5(
+  task_id UNINDEXED,
+  title,
+  notes,
+  tags,
+  tokenize='trigram'
+);
+
+-- 任务新增/标题备注变更/物理删除时维护索引行；tags 由 task_tags 触发器维护。
+CREATE TRIGGER IF NOT EXISTS tasks_fts_after_insert AFTER INSERT ON tasks BEGIN
+  INSERT INTO tasks_fts (task_id, title, notes, tags)
+  VALUES (
+    NEW.id,
+    NEW.title,
+    NEW.notes,
+    COALESCE((
+      SELECT group_concat(tg.name, ' ')
+      FROM task_tags tt JOIN tags tg ON tg.id = tt.tag_id
+      WHERE tt.task_id = NEW.id
+    ), '')
+  );
+END;
+
+CREATE TRIGGER IF NOT EXISTS tasks_fts_after_update AFTER UPDATE OF title, notes ON tasks BEGIN
+  UPDATE tasks_fts SET title = NEW.title, notes = NEW.notes WHERE task_id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS tasks_fts_after_delete AFTER DELETE ON tasks BEGIN
+  DELETE FROM tasks_fts WHERE task_id = OLD.id;
+END;
+
+-- 标签关联变化时重算该任务的 tags 拼接文本（标签名以空格分隔，供 trigram 匹配）。
+CREATE TRIGGER IF NOT EXISTS task_tags_fts_after_insert AFTER INSERT ON task_tags BEGIN
+  UPDATE tasks_fts
+  SET tags = COALESCE((
+    SELECT group_concat(tg.name, ' ')
+    FROM task_tags tt JOIN tags tg ON tg.id = tt.tag_id
+    WHERE tt.task_id = NEW.task_id
+  ), '')
+  WHERE task_id = NEW.task_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS task_tags_fts_after_delete AFTER DELETE ON task_tags BEGIN
+  UPDATE tasks_fts
+  SET tags = COALESCE((
+    SELECT group_concat(tg.name, ' ')
+    FROM task_tags tt JOIN tags tg ON tg.id = tt.tag_id
+    WHERE tt.task_id = OLD.task_id
+  ), '')
+  WHERE task_id = OLD.task_id;
+END;
+
+-- 标签改名会改变已索引的 tags 文本，重命名时同步所有关联任务。
+CREATE TRIGGER IF NOT EXISTS tags_fts_after_rename AFTER UPDATE OF name ON tags BEGIN
+  UPDATE tasks_fts
+  SET tags = COALESCE((
+    SELECT group_concat(tg.name, ' ')
+    FROM task_tags tt JOIN tags tg ON tg.id = tt.tag_id
+    WHERE tt.task_id = tasks_fts.task_id
+  ), '')
+  WHERE task_id IN (SELECT task_id FROM task_tags WHERE tag_id = NEW.id);
+END;
+
 CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -155,6 +221,29 @@ export function initDb(dir: string): void {
   }
   seedIfEmpty()
   seedPetSettings(isExistingInstall)
+  backfillSearchIndex()
+}
+
+/**
+ * 幂等回填搜索索引：
+ * - 只为 tasks_fts 中不存在的任务插入行（索引为空时即全量回填）；
+ * - 删除 tasks 已不存在（物理删除/旧库残留）的孤儿索引行。
+ * 触发器已覆盖日常写入，这里只负责升级旧库和修复索引缺行。
+ */
+function backfillSearchIndex(): void {
+  const c = conn()
+  c.prepare(
+    `INSERT INTO tasks_fts (task_id, title, notes, tags)
+     SELECT t.id, t.title, t.notes,
+       COALESCE((
+         SELECT group_concat(tg.name, ' ')
+         FROM task_tags tt JOIN tags tg ON tg.id = tt.tag_id
+         WHERE tt.task_id = t.id
+       ), '')
+     FROM tasks t
+     WHERE t.id NOT IN (SELECT task_id FROM tasks_fts)`
+  ).run()
+  c.prepare('DELETE FROM tasks_fts WHERE task_id NOT IN (SELECT id FROM tasks)').run()
 }
 
 export function closeDb(): void {
@@ -754,6 +843,23 @@ export function markReminderSent(id: string): void {
   conn().prepare('UPDATE tasks SET notified_at = ? WHERE id = ?').run(nowIso(), id)
 }
 
+/**
+ * Snooze one pending reminder: re-arm reminder_at to now + minutes and clear
+ * notified_at so the reminder loop can fire it again. Completed or deleted
+ * tasks are ignored, matching the reminder query's own filters.
+ */
+export function snoozeReminder(id: string, minutes: number): void {
+  if (!Number.isFinite(minutes)) throw new Error('稍后提醒时间无效')
+  const mins = Math.min(1440, Math.max(1, Math.round(minutes)))
+  const now = Date.now()
+  conn()
+    .prepare(
+      `UPDATE tasks SET reminder_at = ?, notified_at = NULL, updated_at = ?
+       WHERE id = ? AND deleted_at IS NULL AND status = 0`
+    )
+    .run(new Date(now + mins * 60000).toISOString(), new Date(now).toISOString(), id)
+}
+
 export function deleteTask(id: string): void {
   const now = nowIso()
   const batch = randomUUID()
@@ -1045,9 +1151,7 @@ export function getSidebar(): SidebarData {
   return { folders: getFolders(), lists: getLists(), tags: getTags(), counts }
 }
 
-export function searchTasks(q: string): Task[] {
-  const raw = q.trim()
-  if (!raw) return []
+function likeSearchTasks(raw: string, limit: number, offset: number): Task[] {
   // 转义 LIKE 通配符，避免搜索 "%" 或 "_" 时匹配全部
   const term = `%${raw.replace(/[\\%_]/g, (m) => '\\' + m)}%`
   const rows = conn()
@@ -1056,10 +1160,53 @@ export function searchTasks(q: string): Task[] {
        WHERE t.deleted_at IS NULL AND (t.title LIKE ? ESCAPE '\\' OR t.notes LIKE ? ESCAPE '\\' OR t.id IN (
          SELECT tt.task_id FROM task_tags tt JOIN tags tg ON tg.id = tt.tag_id WHERE tg.name LIKE ? ESCAPE '\\'
        ))
-       ORDER BY t.status ASC, t.updated_at DESC LIMIT 60`
+       ORDER BY t.status ASC, t.updated_at DESC, t.id ASC LIMIT ? OFFSET ?`
     )
-    .all(term, term, term) as Record<string, unknown>[]
+    .all(term, term, term, limit, offset) as Record<string, unknown>[]
   return rows.map(mapTask)
+}
+
+/**
+ * 把用户输入转成 FTS5 MATCH 表达式：按空白切词，每个词整体作为带引号短语，
+ * 词间用 AND 连接。内部双引号按 FTS5 规则双写转义，避免 `-`、`*`、`OR`
+ * 之类字符被当成查询语法。
+ */
+function ftsMatchExpression(raw: string): string {
+  return raw
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => `"${token.replace(/"/g, '""')}"`)
+    .join(' AND ')
+}
+
+/**
+ * 搜索任务：3 个及以上 Unicode 码点时优先走 FTS5 trigram（中英文均可），
+ * 少于 3 个字符、FTS 无结果或 FTS 报错时回退到原来的 LIKE 搜索。
+ * 两条路径都排除回收站任务，并支持 limit/offset 分页。
+ */
+export function searchTasks(q: string, limit = 200, offset = 0): Task[] {
+  const raw = q.trim()
+  if (!raw) return []
+  const safeLimit = Number.isFinite(limit) ? Math.max(0, Math.trunc(limit)) : 200
+  const safeOffset = Number.isFinite(offset) ? Math.max(0, Math.trunc(offset)) : 0
+
+  if (Array.from(raw).length >= 3) {
+    try {
+      const rows = conn()
+        .prepare(
+          `SELECT t.*, ${TAGS_SUBQUERY}, ${SUBTASK_COUNTS}
+           FROM tasks_fts JOIN tasks t ON t.id = tasks_fts.task_id
+           WHERE tasks_fts MATCH ? AND t.deleted_at IS NULL
+           ORDER BY bm25(tasks_fts), t.status ASC, t.updated_at DESC, t.id ASC
+           LIMIT ? OFFSET ?`
+        )
+        .all(ftsMatchExpression(raw), safeLimit, safeOffset) as Record<string, unknown>[]
+      if (rows.length) return rows.map(mapTask)
+    } catch {
+      // FTS 语法/运行错误不能让搜索崩掉，直接降级 LIKE。
+    }
+  }
+  return likeSearchTasks(raw, safeLimit, safeOffset)
 }
 
 export function checkpoint(): void {

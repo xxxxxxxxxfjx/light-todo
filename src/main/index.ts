@@ -14,11 +14,14 @@ import {
 import { join } from 'node:path'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { release } from 'node:os'
-import { initDb, closeDb, getDueReminders, getSetting, setSetting, markReminderSent, purgeTrash } from './db'
+import { initDb, closeDb, getDueReminders, getSetting, setSetting, markReminderSent, purgeTrash, setTaskStatus, snoozeReminder } from './db'
+import { buildTaskToastXml, parseReminderProtocol } from './reminder'
 import { windowColors, type ThemePreference } from './window-theme'
 import { registerIpc } from './ipc'
 import { backupNow, registerDataIpc } from './data'
-import { registerPet, schedulePetCreation, stopPet, togglePet } from './pet'
+import { registerPet, schedulePetCreation, stopPet, togglePet, notifyTaskWindows } from './pet'
+import { updateTaskbarBadge } from './badge'
+import type { Task } from '../shared/types'
 
 const T0 = Date.now()
 const isDev = !app.isPackaged
@@ -340,6 +343,79 @@ function createTray(): void {
   tray.on('click', showMain)
 }
 
+const REMINDER_MISSED_AFTER_MS = 10 * 60 * 1000
+const REMINDER_MAX_TASKS_PER_TICK = 3
+
+function markRemindersSent(tasks: Task[]): void {
+  for (const task of tasks) {
+    try {
+      markReminderSent(task.id)
+    } catch (error) {
+      console.warn('REMINDER_MARK_FAILED', task.id, error)
+    }
+  }
+}
+
+function showReminderSummary(body: string): void {
+  try {
+    const n = new Notification({ title: '轻单', body })
+    n.on('click', () => showMain())
+    n.show()
+  } catch (error) {
+    console.warn('REMINDER_SUMMARY_FAILED', error)
+  }
+}
+
+function showReminderNotification(task: Task): void {
+  const handleAction = (index: number): void => {
+    try {
+      if (index === 0) setTaskStatus(task.id, true)
+      else if (index === 1) snoozeReminder(task.id, 10)
+      else return
+      notifyTaskWindows()
+    } catch (error) {
+      console.warn('REMINDER_ACTION_FAILED', task.id, error)
+    }
+  }
+
+  // Windows: toast XML carries protocol buttons, so they work even when the
+  // toast activates a fresh instance instead of the running renderer.
+  if (process.platform === 'win32') {
+    try {
+      const toast = new Notification({ toastXml: buildTaskToastXml(task) })
+      toast.on('click', () => {
+        showMain()
+        sendToRendererWhenReady('ui:open-task', task.id)
+      })
+      toast.show()
+      return
+    } catch (error) {
+      console.warn('TOAST_XML_FAILED', task.id, error)
+    }
+  }
+
+  // macOS / non-Windows / toast fallback: native buttons handled in-process.
+  try {
+    const n = new Notification({
+      title: '轻单 · 提醒',
+      body: task.title,
+      silent: false,
+      actions: [
+        { type: 'button', text: '完成' },
+        { type: 'button', text: '稍后 10 分钟' }
+      ]
+    })
+    n.on('click', () => {
+      showMain()
+      sendToRendererWhenReady('ui:open-task', task.id)
+    })
+    n.on('action', (_event, index) => handleAction(index))
+    n.show()
+  } catch (error) {
+    console.warn('REMINDER_NOTIFICATION_FAILED', task.id, error)
+  }
+}
+
 function startReminderLoop(): void {
   const tick = (): void => {
     try {
@@ -347,38 +423,46 @@ function startReminderLoop(): void {
     } catch {
       /* ignore */
     }
+    const now = Date.now()
     let due: ReturnType<typeof getDueReminders>
     try {
-      due = getDueReminders(new Date().toISOString())
+      due = getDueReminders(new Date(now).toISOString())
     } catch (e) {
       console.error('reminder query failed', e)
       return
     }
     if (!due.length) return
-    const supported = Notification.isSupported()
-    for (const task of due.slice(0, 3)) {
-      if (supported) {
-        const n = new Notification({
-          title: '轻单 · 提醒',
-          body: task.title,
-          silent: false
-        })
-        n.on('click', () => {
-          showMain()
-          sendToRenderer('ui:open-task', task.id)
-        })
-        n.show()
-      }
-      markReminderSent(task.id)
+
+    const cutoff = now - REMINDER_MISSED_AFTER_MS
+    const missed: Task[] = []
+    const fresh: Task[] = []
+    for (const task of due) {
+      const at = task.reminderAt ? Date.parse(task.reminderAt) : Number.NaN
+      // An unparsable reminder timestamp is treated as fresh rather than lost.
+      if (Number.isFinite(at) && at < cutoff) missed.push(task)
+      else fresh.push(task)
     }
-    if (due.length > 3) {
+
+    const supported = Notification.isSupported()
+
+    // One digest for everything that missed its 10-minute window; revealing
+    // each stale reminder would flood the action center after sleep/resume.
+    if (missed.length) {
+      if (supported) showReminderSummary(`有 ${missed.length} 条提醒已错过，打开今天查看`)
+      markRemindersSent(missed)
+    }
+
+    if (fresh.length) {
+      const shown = fresh.slice(0, REMINDER_MAX_TASKS_PER_TICK)
       if (supported) {
-        new Notification({
-          title: '轻单',
-          body: `还有 ${due.length - 3} 条提醒，打开应用查看`
-        }).show()
+        for (const task of shown) showReminderNotification(task)
+        if (fresh.length > shown.length) {
+          showReminderSummary(`还有 ${fresh.length - shown.length} 条提醒`)
+        }
       }
-      for (const task of due.slice(3)) markReminderSent(task.id)
+      // Even when native notifications are unsupported, consume the reminders
+      // so the loop does not spin on the same rows forever.
+      markRemindersSent(fresh)
     }
   }
   setTimeout(tick, 3000)
@@ -392,6 +476,30 @@ function registerShortcuts(): void {
 
 function handleProtocolUrl(url: string): void {
   console.log('PROTOCOL_URL', url)
+
+  // Reminder actions never hijack focus: complete/snooze only mutate data and
+  // refresh windows. open is the one action the user expects to bring app up.
+  const reminder = parseReminderProtocol(url)
+  if (reminder) {
+    try {
+      if (reminder.action === 'complete') {
+        setTaskStatus(reminder.id, true)
+        notifyTaskWindows()
+        updateTaskbarBadge()
+      } else if (reminder.action === 'snooze') {
+        snoozeReminder(reminder.id, reminder.minutes ?? 10)
+        notifyTaskWindows()
+        updateTaskbarBadge()
+      } else {
+        showMain()
+        sendToRendererWhenReady('ui:open-task', reminder.id)
+      }
+    } catch (e) {
+      console.warn('REMINDER_PROTOCOL_FAILED', url, e)
+    }
+    return
+  }
+
   try {
     const u = new URL(url)
     if (u.protocol !== 'lighttodo:') return
@@ -461,6 +569,7 @@ if (ownsInstance) app.whenReady().then(() => {
     if (settings) sendToRendererWhenReady('ui:settings')
   }, T0)
   createTray()
+  setTimeout(updateTaskbarBadge, 1200)
   registerShortcuts()
   setupIntegration()
   startReminderLoop()

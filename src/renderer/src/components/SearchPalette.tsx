@@ -86,8 +86,8 @@ export function SearchPalette(): React.JSX.Element {
           {q.trim() !== '' && !searching && results.length === 0 && (
             <div className="search-hint">没有找到匹配的任务</div>
           )}
-          {!searching && results.length >= 60 && (
-            <div className="search-hint">结果较多，仅显示前 60 条，请输入更具体的关键词</div>
+          {!searching && results.length >= 200 && (
+            <div className="search-hint">结果较多，仅显示前 200 条，请输入更具体的关键词</div>
           )}
           {results.map((t, i) => {
             const due = dueLabel(t)

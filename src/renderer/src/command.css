@@ -1,0 +1,74 @@
+/* Command palette: a keyboard-first launcher for views, lists and data actions. */
+.command-overlay {
+  align-items: flex-start;
+  padding-top: 12vh;
+}
+.command-panel {
+  width: min(560px, calc(100vw - 40px));
+  max-height: min(520px, 72vh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-panel);
+  animation: pop 0.16s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+}
+.command-input-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-3);
+}
+.command-input-row input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.command-list {
+  overflow-y: auto;
+  padding: 6px;
+}
+.command-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.command-item.active {
+  background: var(--hover);
+}
+.command-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.command-item kbd {
+  color: var(--text-3);
+  font-size: 10.5px;
+}
+.command-empty {
+  padding: 24px 12px;
+  color: var(--text-3);
+  font-size: 12px;
+  text-align: center;
+}

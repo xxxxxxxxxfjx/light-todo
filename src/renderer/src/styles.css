@@ -1466,6 +1466,21 @@ kbd {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
   animation: toast-in 0.18s ease;
   z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.toast-undo {
+  border: 0;
+  border-radius: 5px;
+  padding: 3px 7px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.toast-undo:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 @keyframes fade {
@@ -2115,4 +2130,44 @@ body.calendar-resizing, body.calendar-resizing * { cursor:row-resize !important;
 }
 .task-virtual-section .section-head {
   margin: 0;
+}
+
+/* ── Task drag sorting + inline title editing (90-day plan, stage 2) ──
+   Appended as a self-contained block; earlier .task-row rules stay intact. */
+.task-row.dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+.task-row.drop-before::before,
+.task-row.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+  pointer-events: none;
+  z-index: 1;
+}
+.task-row.drop-before::before {
+  top: -4px;
+}
+.task-row.drop-after::after {
+  bottom: -4px;
+}
+.task-title-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 1px 6px;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }

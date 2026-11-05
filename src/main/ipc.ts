@@ -2,11 +2,13 @@ import { app, ipcMain, shell } from 'electron'
 import * as db from './db'
 import type { CreateTaskInput, UpdateTaskInput } from '../shared/types'
 import { notifyTaskWindows } from './pet'
+import { updateTaskbarBadge } from './badge'
 
 export function registerIpc(): void {
   const mutate = <T>(sender: number, action: () => T): T => {
     const result = action()
     notifyTaskWindows(sender)
+    updateTaskbarBadge()
     return result
   }
   ipcMain.handle('app:info', () => ({
@@ -17,6 +19,11 @@ export function registerIpc(): void {
   }))
   ipcMain.handle('app:openDataDir', async () => {
     await shell.openPath(db.getDataDir())
+  })
+  ipcMain.handle('app:openExternal', async (_event, url: string) => {
+    if (!/^https?:\/\//i.test(url)) return false
+    await shell.openExternal(url)
+    return true
   })
 
   ipcMain.handle('sidebar:get', () => db.getSidebar())

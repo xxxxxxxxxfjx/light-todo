@@ -57,6 +57,10 @@ interface AppStore {
   searchOpen: boolean
   settingsOpen: boolean
   toast: string
+  /** 最近一次可撤销操作的说明；空字符串表示没有可撤销操作。 */
+  undoLabel: string
+  undo: () => Promise<void>
+  moveTask: (id: string, targetId: string, place?: 'before' | 'after') => Promise<void>
   setFilter: (f: TaskFilter) => void
   setView: (type: ViewKey, opts?: { listId?: string; tagId?: string; title?: string }) => Promise<void>
   refresh: () => Promise<void>
@@ -93,6 +97,28 @@ let selectionId = 0
 // back to the initial page while a loadMore request is still in flight.
 let requestedLimit = 0
 
+interface UndoAction {
+  label: string
+  run: () => Promise<void>
+}
+
+const undoStack: UndoAction[] = []
+const UNDO_LIMIT = 30
+
+function pushUndo(label: string, run: () => Promise<void>): void {
+  undoStack.push({ label, run })
+  if (undoStack.length > UNDO_LIMIT) undoStack.shift()
+  useStore.setState({ undoLabel: label })
+}
+
+/** Midpoint between two sort_order values, leaving room for later inserts. */
+function sortOrderBetween(prev: number | undefined, next: number | undefined): number {
+  if (prev === undefined && next === undefined) return Date.now()
+  if (prev === undefined) return next! - 1024
+  if (next === undefined) return prev + 1024
+  return (prev + next) / 2
+}
+
 export const useStore = create<AppStore>((set, get) => ({
   view: { type: 'today', title: '今天' },
   tasks: [],
@@ -122,6 +148,7 @@ export const useStore = create<AppStore>((set, get) => ({
   searchOpen: false,
   settingsOpen: false,
   toast: '',
+  undoLabel: '',
 
   setFilter: (filter) => set({ filter, selectedIds: [] }),
 
@@ -225,12 +252,17 @@ export const useStore = create<AppStore>((set, get) => ({
   toggleTask: async (id) => {
     const task = get().tasks.find((t) => t.id === id) ?? get().selected
     if (!task) return
-    await window.api.tasks.setStatus(id, task.status !== 1)
+    const wasDone = task.status === 1
+    await window.api.tasks.setStatus(id, !wasDone)
     const { selected } = get()
     if (selected?.id === id) {
       set({ selected: await window.api.tasks.get(id) })
     }
     await Promise.all([get().refresh(), get().refreshSidebar()])
+    pushUndo(wasDone ? `恢复「${task.title}」` : `完成「${task.title}」`, async () => {
+      await window.api.tasks.setStatus(id, wasDone)
+      await Promise.all([get().refresh(), get().refreshSidebar()])
+    })
   },
 
   createTask: async (input) => {
@@ -240,18 +272,80 @@ export const useStore = create<AppStore>((set, get) => ({
   },
 
   updateTask: async (id, patch) => {
+    const beforeTask = get().tasks.find((t) => t.id === id) ?? get().selected
     const task = await window.api.tasks.update(id, patch)
     const { selected } = get()
     if (selected?.id === id) set({ selected: task })
     await Promise.all([get().refresh(), get().refreshSidebar()])
+
+    // Undo only covers moves (date/someday/list). Typing title/notes should
+    // never create an undo entry that surprises the user with Ctrl+Z.
+    if (beforeTask) {
+      const before: UpdateTaskInput = {}
+      const moveKeys: (keyof UpdateTaskInput)[] = ['scheduledDate', 'dueAt', 'someday', 'listId']
+      let changed = false
+      for (const key of moveKeys) {
+        if (!Object.prototype.hasOwnProperty.call(patch, key)) continue
+        const oldValue = beforeTask[key as keyof typeof beforeTask]
+        if (oldValue !== patch[key]) {
+          ;(before as Record<string, unknown>)[key] = oldValue
+          changed = true
+        }
+      }
+      if (changed) {
+        const label = patch.someday === true ? '移到也许' : patch.scheduledDate !== undefined ? '调整日期' : '移动任务'
+        pushUndo(label, async () => {
+          await window.api.tasks.update(id, before)
+          await Promise.all([get().refresh(), get().refreshSidebar()])
+        })
+      }
+    }
     return task
   },
 
   deleteTask: async (id) => {
+    const task = get().tasks.find((t) => t.id === id) ?? get().selected
     await window.api.tasks.remove(id)
     if (get().selected?.id === id) set({ selected: null })
     await Promise.all([get().refresh(), get().refreshSidebar()])
     get().showToast('已移到回收站')
+    if (task) {
+      pushUndo(`删除「${task.title}」`, async () => {
+        await window.api.tasks.restore(id)
+        await Promise.all([get().refresh(), get().refreshSidebar()])
+      })
+    }
+  },
+
+  undo: async () => {
+    const action = undoStack.pop()
+    if (!action) return
+    try {
+      await action.run()
+      set({ undoLabel: undoStack.length ? undoStack[undoStack.length - 1].label : '' })
+      get().showToast(`已撤销：${action.label}`)
+    } catch (error) {
+      undoStack.push(action)
+      get().showToast('撤销失败，请重试')
+      throw error
+    }
+  },
+
+  moveTask: async (id, targetId, place = 'before') => {
+    const tasks = get().tasks
+    const dragged = tasks.find((t) => t.id === id)
+    if (!dragged || id === targetId) return
+    const rest = tasks.filter((t) => t.id !== id)
+    const targetIndex = rest.findIndex((t) => t.id === targetId)
+    if (targetIndex < 0) return
+    const insertAt = place === 'before' ? targetIndex : targetIndex + 1
+    const sortOrder = sortOrderBetween(rest[insertAt - 1]?.sortOrder, rest[insertAt]?.sortOrder)
+    await window.api.tasks.reorder([{ id, sortOrder }])
+    await Promise.all([get().refresh(), get().refreshSidebar()])
+    pushUndo('拖动排序', async () => {
+      await window.api.tasks.reorder([{ id, sortOrder: dragged.sortOrder }])
+      await Promise.all([get().refresh(), get().refreshSidebar()])
+    })
   },
 
   restoreTask: async (id) => {

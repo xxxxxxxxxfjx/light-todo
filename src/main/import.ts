@@ -171,7 +171,154 @@ function generic(rows: string[][]): TaskDraft[] {
     .filter((t) => t.title)
 }
 
+/** Header comparison for Microsoft To Do: case- and whitespace-insensitive. */
+function normalizeHeader(header: string): string {
+  return header.replace(/^\uFEFF/, '').trim().toLowerCase().replace(/\s+/g, '')
+}
+
+function isMsTodo(headers: string[]): boolean {
+  const has = (name: string): boolean => headers.includes(name)
+  return has('subject') && (has('status') || has('completed')) && (has('duedate') || has('startdate'))
+}
+
+interface ImportDate {
+  date: string
+  time: string | null
+  iso: string | null
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+function makeImportDate(
+  year: number,
+  month: number,
+  day: number,
+  hour?: number,
+  minute?: number,
+  meridiem?: string
+): ImportDate | null {
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null
+  if (hour !== undefined && minute !== undefined) {
+    let h = hour
+    if (meridiem) {
+      if (h < 1 || h > 12) return null
+      if (meridiem.toUpperCase() === 'PM' && h < 12) h += 12
+      if (meridiem.toUpperCase() === 'AM' && h === 12) h = 0
+    }
+    if (h < 0 || h > 23 || minute < 0 || minute > 59) return null
+    const d = new Date(year, month - 1, day, h, minute, 0, 0)
+    if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null
+    return {
+      date: `${year}-${pad2(month)}-${pad2(day)}`,
+      time: `${pad2(h)}:${pad2(minute)}`,
+      iso: d.toISOString()
+    }
+  }
+  const d = new Date(year, month - 1, day, 0, 0, 0, 0)
+  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null
+  return { date: `${year}-${pad2(month)}-${pad2(day)}`, time: null, iso: null }
+}
+
+/** Parse Microsoft To Do date cells: date-only, date+time, or ISO with zone. */
+function parseMsDate(raw: string | undefined): ImportDate | null {
+  const s = (raw ?? '').trim()
+  if (!s) return null
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/i.test(s)) {
+    const d = new Date(s)
+    if (Number.isNaN(d.getTime())) return null
+    return {
+      date: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`,
+      time: `${pad2(d.getHours())}:${pad2(d.getMinutes())}`,
+      iso: d.toISOString()
+    }
+  }
+  let m = s.match(
+    /^(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})[日号]?(?:[T\s]+(\d{1,2})[:：](\d{2})(?::\d{2})?\s*(AM|PM)?)?$/i
+  )
+  if (m) {
+    return makeImportDate(
+      Number(m[1]),
+      Number(m[2]),
+      Number(m[3]),
+      m[4] === undefined ? undefined : Number(m[4]),
+      m[5] === undefined ? undefined : Number(m[5]),
+      m[6]
+    )
+  }
+  m = s.match(
+    /^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})(?:[T\s]+(\d{1,2})[:：](\d{2})(?::\d{2})?\s*(AM|PM)?)?$/i
+  )
+  if (m) {
+    let year = Number(m[3])
+    if (year < 100) year += 2000
+    let month = Number(m[1])
+    let day = Number(m[2])
+    // US exports default to month/day; swap only when the first part cannot be a month.
+    if (month > 12 && day <= 12) {
+      const swap = month
+      month = day
+      day = swap
+    }
+    return makeImportDate(
+      year,
+      month,
+      day,
+      m[4] === undefined ? undefined : Number(m[4]),
+      m[5] === undefined ? undefined : Number(m[5]),
+      m[6]
+    )
+  }
+  return null
+}
+
+function msTodo(rows: string[][]): TaskDraft[] {
+  const headers = rows[0].map(normalizeHeader)
+  const col = (...names: string[]): number => {
+    for (const name of names) {
+      const idx = headers.indexOf(name)
+      if (idx >= 0) return idx
+    }
+    return -1
+  }
+  const idx = {
+    title: col('subject'),
+    notes: col('notes', 'body'),
+    status: col('status'),
+    completed: col('completed'),
+    importance: col('importance'),
+    due: col('duedate'),
+    start: col('startdate'),
+    list: col('listname', 'list')
+  }
+  const out: TaskDraft[] = []
+  for (const r of rows.slice(1)) {
+    const cell = (i: number): string => (i >= 0 ? (r[i] ?? '').trim() : '')
+    const title = cell(idx.title)
+    if (!title) continue
+    const date = parseMsDate(cell(idx.due)) ?? parseMsDate(cell(idx.start))
+    const status = cell(idx.status)
+    const completed = cell(idx.completed)
+    const importance = cell(idx.importance)
+    out.push({
+      title,
+      notes: idx.notes >= 0 ? (r[idx.notes] ?? '') : '',
+      listName: cell(idx.list) || null,
+      priority: /^high/i.test(importance) ? 3 : /^low/i.test(importance) ? 1 : 0,
+      scheduledDate: date && !date.time ? date.date : null,
+      dueAt: date && date.time ? date.iso : null,
+      done:
+        /^(completed|complete|done|已完成|完成)$/i.test(status) ||
+        (completed !== '' && !/^(false|0|no|n|否|未完成)$/i.test(completed))
+    })
+  }
+  return out
+}
+
 function performImport(content: string, filename: string): ImportResult {
+  // Exports carry a UTF-8 BOM; it must not become part of the first header cell.
+  content = content.replace(/^\uFEFF/, '')
   const errors: string[] = []
   const isJson = filename.toLowerCase().endsWith('.json') || content.trim().startsWith('{')
   const result: ImportResult = { ok: false, lists: 0, tasks: 0, tags: 0, errors }
@@ -257,8 +404,10 @@ function performImport(content: string, filename: string): ImportResult {
       return result
     }
     const headers = rows[0].map((h) => h.trim().toLowerCase())
+    const normalizedHeaders = rows[0].map(normalizeHeader)
     let drafts: TaskDraft[]
-    if (headers.includes('标题')) drafts = ticktick(rows)
+    if (isMsTodo(normalizedHeaders)) drafts = msTodo(rows)
+    else if (headers.includes('标题')) drafts = ticktick(rows)
     else if (headers.includes('content') && headers.includes('type')) drafts = todoist(rows)
     else drafts = generic(rows)
 

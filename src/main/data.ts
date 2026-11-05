@@ -12,6 +12,7 @@ import {
 import { basename, join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { checkpoint, clearCompleted, closeDb, getAllData, getDataDir, initDb } from './db'
+import { buildIcs, buildTaskCsv } from './export'
 import { importFromText } from './import'
 import { buildMarkdown } from './markdown'
 import { notifyTaskWindows } from './pet'
@@ -20,6 +21,12 @@ function stamp(): string {
   const d = new Date()
   const p = (n: number): string => String(n).padStart(2, '0')
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+}
+
+function dayStamp(): string {
+  const d = new Date()
+  const p = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`
 }
 
 export function backupNow(reason = 'manual'): string | null {
@@ -140,6 +147,36 @@ export function registerDataIpc(): void {
     if (canceled || !filePath) return { ok: false }
     writeFileSync(filePath, markdown(), 'utf8')
     return { ok: true, path: filePath }
+  })
+  ipcMain.handle('data:exportCsv', async () => {
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: '导出 CSV',
+      defaultPath: join(app.getPath('documents'), `轻单任务-${dayStamp()}.csv`),
+      filters: [{ name: 'CSV', extensions: ['csv'] }]
+    })
+    if (canceled || !filePath) return { ok: false }
+    try {
+      const data = getAllData()
+      writeFileSync(filePath, buildTaskCsv(data.tasks, data.lists), 'utf8')
+      return { ok: true, path: filePath }
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) }
+    }
+  })
+  ipcMain.handle('data:exportIcs', async () => {
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: '导出 ICS',
+      defaultPath: join(app.getPath('documents'), `轻单日历-${dayStamp()}.ics`),
+      filters: [{ name: 'iCalendar', extensions: ['ics'] }]
+    })
+    if (canceled || !filePath) return { ok: false }
+    try {
+      const data = getAllData()
+      writeFileSync(filePath, buildIcs(data.tasks), 'utf8')
+      return { ok: true, path: filePath }
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) }
+    }
   })
   ipcMain.handle('data:openBackups', async () => {
     const dir = join(getDataDir(), 'backups')

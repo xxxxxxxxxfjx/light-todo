@@ -114,12 +114,17 @@ export function SettingsModal(): React.JSX.Element {
     window.api.app.setTheme(t as 'system' | 'light' | 'dark')
   }
 
-  const exportFile = async (kind: 'json' | 'md'): Promise<void> => {
+  const exportFile = async (kind: 'json' | 'md' | 'csv' | 'ics'): Promise<void> => {
     const res =
       kind === 'json'
         ? await window.api.data.exportJson()
-        : await window.api.data.exportMarkdown()
+        : kind === 'md'
+          ? await window.api.data.exportMarkdown()
+          : kind === 'csv'
+            ? await window.api.data.exportCsv()
+            : await window.api.data.exportIcs()
     if (res.ok) showToast(`已导出到 ${res.path}`)
+    else if (res.message) showToast(`导出失败：${res.message}`)
   }
 
   const addTag = async (): Promise<void> => {
@@ -161,7 +166,7 @@ export function SettingsModal(): React.JSX.Element {
           <section className="set-section pet-settings" hidden={section !== 'pet'}>
             <div className="pet-settings-preview">
               <Mascot skin={pet.skin}/>
-              <div><span className="pet-settings-kicker">YOUR LITTLE COMPANION</span><h2>让小可爱，陪你过好今天</h2><p>今日任务就在桌面右下角，轻轻一勾，完成一件。</p><span className="pet-settings-status">{pet.enabled ? '✦ 已开启 · 桌面置顶陪伴中' : '♡ 默认关闭 · 需要时再开启'}</span></div>
+              <div><span className="pet-settings-kicker">YOUR LITTLE COMPANION</span><h2>一只只负责可爱的小家伙</h2><p>它会呼吸、眨眼、偷偷看你；点一下会跳，拖到哪儿就待在哪儿。</p><span className="pet-settings-status">{pet.enabled ? '✦ 已开启 · 桌面置顶陪伴中' : '♡ 默认关闭 · 需要时再开启'}</span></div>
             </div>
             <fieldset disabled={!petReady || petSaving} className="pet-settings-controls">
               <div className="set-title"><PawPrint size={14}/> 桌面伙伴</div>
@@ -171,7 +176,7 @@ export function SettingsModal(): React.JSX.Element {
               <label className="set-row"><span className="set-label">不透明度</span><select className="set-select" value={pet.opacity} onChange={e => changePet({ opacity: Number(e.target.value) })}>{[1, .9, .8, .65, .5].map(v => <option key={v} value={v}>{Math.round(v * 100)}%</option>)}</select></label>
               <div className="set-row"><span className="set-label">桌面位置</span><button className="mini-btn" disabled={!pet.enabled} title={!pet.enabled ? '请先开启桌宠' : '把伙伴移回屏幕右下角'} onClick={async () => { const ok = await window.api.pet.reset(); showToast(ok ? '桌面伙伴已回到右下角' : '请先开启桌宠') }}><RotateCcw size={12}/> 回到右下角</button><span className="set-hint">拖动伙伴可调整位置</span></div>
             </fieldset>
-            <div className="pet-settings-note">桌宠在主窗口就绪后延迟约 8 秒加载，不影响冷启动。默认只显示小宠物，鼠标移入展开今天和逾期任务，移开后收起。列表仅用滚轮滚动；拖动宠物调整位置，右键打开菜单。</div>
+            <div className="pet-settings-note">桌宠只做情绪陪伴：单击逗它、双击打开轻单、右键菜单、拖动换位置。任务提醒与快捷操作交给「任务岛」，两者可同时开启，也可以只留其一。</div>
           </section>
           <section className="set-section" hidden={section !== 'appearance'}>
             <div className="set-title">
@@ -298,6 +303,12 @@ export function SettingsModal(): React.JSX.Element {
               <button className="mini-btn" onClick={() => exportFile('md')}>
                 <Download size={12} /> Markdown
               </button>
+              <button className="mini-btn" aria-label="导出 CSV" onClick={() => exportFile('csv')}>
+                <Download size={12} /> CSV
+              </button>
+              <button className="mini-btn" aria-label="导出 ICS" onClick={() => exportFile('ics')}>
+                <Download size={12} /> ICS
+              </button>
             </div>
             <div className="set-row">
               <span className="set-label">导入</span>
@@ -315,7 +326,7 @@ export function SettingsModal(): React.JSX.Element {
               >
                 <Download size={12} /> JSON / CSV
               </button>
-              <span className="set-hint">支持轻单 JSON、TickTick 与 Todoist CSV</span>
+              <span className="set-hint">支持轻单 JSON、TickTick、Todoist 与 Microsoft To Do CSV</span>
             </div>
             <div className="set-row">
               <span className="set-label">备份</span>

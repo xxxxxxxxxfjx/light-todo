@@ -4,6 +4,8 @@ import { useStore } from '../store'
 import { humanDate, isoToLocalInput, localInputToIso, todayStr } from '../lib/format'
 import type { Task } from '@shared/types'
 import { repeatLabel } from '../lib/repeat'
+import { parseMarkdown, toggleChecklistLine } from '../lib/markdown'
+import { MarkdownView } from './MarkdownView'
 
 function Field({
   label,
@@ -34,6 +36,7 @@ export function DetailPanel(): React.JSX.Element {
   } = useStore()
   const [title, setTitle] = useState('')
   const [notes, setNotes] = useState('')
+  const [notesMode, setNotesMode] = useState<'edit' | 'preview'>('edit')
   const notesRef = useRef<HTMLTextAreaElement>(null)
   const [tagText, setTagText] = useState('')
   const [subDraft, setSubDraft] = useState('')
@@ -42,6 +45,7 @@ export function DetailPanel(): React.JSX.Element {
   useEffect(() => {
     setTitle(selected?.title ?? '')
     setNotes(selected?.notes ?? '')
+    setNotesMode('edit')
     setTagText((selected?.tags ?? []).map((t) => t.name).join(' '))
     setSubDraft('')
   }, [selected?.id])
@@ -63,6 +67,12 @@ export function DetailPanel(): React.JSX.Element {
     // 以 DOM 实际值为准，避免输入法/程序化输入导致 state 未同步时丢备注
     const value = notesRef.current?.value ?? notes
     if (value !== task.notes) updateTask(task.id, { notes: value })
+  }
+  const toggleChecklist = (line: number): void => {
+    const next = toggleChecklistLine(notes, line)
+    if (next === notes) return
+    setNotes(next)
+    updateTask(task.id, { notes: next })
   }
   const saveTags = (): void => {
     const names = tagText
@@ -303,15 +313,44 @@ export function DetailPanel(): React.JSX.Element {
         <div className="detail-section">
           <div className="detail-section-head">
             <span>备注</span>
+            <div className="notes-tabs">
+              <button
+                className={`notes-tab ${notesMode === 'edit' ? 'active' : ''}`}
+                onClick={() => setNotesMode('edit')}
+              >
+                编辑
+              </button>
+              <button
+                className={`notes-tab ${notesMode === 'preview' ? 'active' : ''}`}
+                onClick={() => {
+                  saveNotes()
+                  setNotesMode('preview')
+                }}
+              >
+                预览
+              </button>
+            </div>
           </div>
-          <textarea
-            ref={notesRef}
-            className="notes"
-            placeholder="支持 Markdown：**加粗**、- 列表、[链接](https://…)"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            onBlur={saveNotes}
-          />
+          {notesMode === 'edit' ? (
+            <textarea
+              ref={notesRef}
+              className="notes"
+              placeholder="支持 Markdown：**加粗**、- 列表、- [ ] 步骤、[链接](https://…)"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              onBlur={saveNotes}
+            />
+          ) : (
+            <div className="notes-preview">
+              <MarkdownView
+                blocks={parseMarkdown(notes)}
+                onToggleChecklist={toggleChecklist}
+                onOpenLink={(href) => {
+                  void window.api.app.openExternal(href)
+                }}
+              />
+            </div>
+          )}
         </div>
 
         {task.rrule && (

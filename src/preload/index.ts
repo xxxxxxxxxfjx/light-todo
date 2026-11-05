@@ -31,7 +31,8 @@ const api = {
   app: {
     setTheme: (theme: 'system' | 'light' | 'dark') => ipcRenderer.invoke('app:setTheme', theme),
     info: () => ipcRenderer.invoke('app:info'),
-    openDataDir: () => ipcRenderer.invoke('app:openDataDir')
+    openDataDir: () => ipcRenderer.invoke('app:openDataDir'),
+    openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url)
   },
   sidebar: {
     get: () => ipcRenderer.invoke('sidebar:get')
@@ -79,6 +80,8 @@ const api = {
     backups: () => ipcRenderer.invoke('data:backups'),
     exportJson: () => ipcRenderer.invoke('data:exportJson'),
     exportMarkdown: () => ipcRenderer.invoke('data:exportMarkdown'),
+    exportCsv: () => ipcRenderer.invoke('data:exportCsv'),
+    exportIcs: () => ipcRenderer.invoke('data:exportIcs'),
     openBackups: () => ipcRenderer.invoke('data:openBackups'),
     import: () => ipcRenderer.invoke('data:import'),
     clearCompleted: () => ipcRenderer.invoke('data:clearCompleted'),

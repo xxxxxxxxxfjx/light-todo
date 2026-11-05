@@ -68,3 +68,49 @@ await morePromise
 assert.equal(useStore.getState().tasks.length, 1000)
 assert.equal(useStore.getState().tasks[0].id, 'full-0')
 console.log('PASS 加载更多与并发刷新不会回退列表')
+
+// Undo: completion, deletion and drag moves must be reversible without a full reload race.
+window.api.tasks.list = async () => []
+window.api.sidebar = { get: async () => ({ folders: [], lists: [], tags: [], counts: {} }) }
+const calls = []
+window.api.tasks.setStatus = async (id, done) => { calls.push(['status', id, done]); return { id, status: done ? 1 : 0 } }
+window.api.tasks.remove = async (id) => { calls.push(['remove', id]) }
+window.api.tasks.restore = async (id) => { calls.push(['restore', id]) }
+window.api.tasks.reorder = async (items) => { calls.push(['reorder', items]) }
+window.api.tasks.update = async (id, patch) => { calls.push(['update', id, patch]); return { id, title: 'Undo', status: 0, ...patch } }
+window.api.tasks.get = async (id) => ({ id, title: 'Undo', status: calls.at(-1)?.[2] ? 1 : 0 })
+
+useStore.setState({
+  view: { type: 'all', title: '全部' },
+  tasks: [{ id: 'undo', title: 'Undo', status: 0, priority: 0, sortOrder: 1024, tags: [], subtaskCount: 0, subtaskDone: 0 }],
+  selected: null,
+  undoLabel: ''
+})
+await useStore.getState().toggleTask('undo')
+assert.equal(useStore.getState().undoLabel, '完成「Undo」')
+await useStore.getState().undo()
+assert.deepEqual(calls.slice(-2), [['status', 'undo', true], ['status', 'undo', false]])
+
+calls.length = 0
+useStore.setState({ tasks: [{ id: 'undo', title: 'Undo', status: 0, priority: 0, sortOrder: 1024, tags: [], subtaskCount: 0, subtaskDone: 0 }], undoLabel: '' })
+await useStore.getState().deleteTask('undo')
+assert.equal(useStore.getState().undoLabel, '删除「Undo」')
+await useStore.getState().undo()
+assert.deepEqual(calls, [['remove', 'undo'], ['restore', 'undo']])
+
+calls.length = 0
+useStore.setState({
+  tasks: [
+    { id: 'a', title: 'A', status: 0, priority: 0, sortOrder: 1024, tags: [], subtaskCount: 0, subtaskDone: 0 },
+    { id: 'b', title: 'B', status: 0, priority: 0, sortOrder: 2048, tags: [], subtaskCount: 0, subtaskDone: 0 },
+    { id: 'c', title: 'C', status: 0, priority: 0, sortOrder: 3072, tags: [], subtaskCount: 0, subtaskDone: 0 }
+  ],
+  undoLabel: ''
+})
+await useStore.getState().moveTask('c', 'b')
+const moved = calls[0][1][0]
+assert.equal(moved.id, 'c')
+assert.equal(moved.sortOrder, 1536)
+await useStore.getState().undo()
+assert.equal(calls[1][1][0].sortOrder, 3072)
+console.log('PASS 撤销覆盖完成/删除/拖动排序')

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { format, addDays } from 'date-fns'
 import { TitleBar } from './components/TitleBar'
 import { Sidebar } from './components/Sidebar'
@@ -8,6 +8,7 @@ import { DetailPanel } from './components/DetailPanel'
 import { QuickAdd } from './components/QuickAdd'
 import { SearchPalette } from './components/SearchPalette'
 import { SettingsModal } from './components/SettingsModal'
+import { CommandPalette } from './components/CommandPalette'
 import { useStore } from './store'
 
 export default function App(): React.JSX.Element {
@@ -23,6 +24,8 @@ export default function App(): React.JSX.Element {
     closeSearch,
     closeSettings,
     toast,
+    undoLabel,
+    undo,
     selected,
     selectTask,
     toggleTask,
@@ -35,6 +38,7 @@ export default function App(): React.JSX.Element {
     sidebarOpen,
     closeSidebar
   } = useStore()
+  const [commandOpen, setCommandOpen] = useState(false)
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('lighttodo.theme')
@@ -102,11 +106,25 @@ export default function App(): React.JSX.Element {
       )
       const mod = e.ctrlKey || e.metaKey
 
+      if (commandOpen) {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          setCommandOpen(false)
+        }
+        return
+      }
       if (settingsOpen) {
         if (e.key === 'Escape') {
           e.preventDefault()
           closeSettings()
         }
+        return
+      }
+      if (mod && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        closeQuickAdd()
+        closeSearch()
+        setCommandOpen(true)
         return
       }
       if (mod && e.key.toLowerCase() === 'f') {
@@ -126,6 +144,12 @@ export default function App(): React.JSX.Element {
         return
       }
       if (typing || quickAddOpen || searchOpen || control) return
+
+      if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        undo()
+        return
+      }
 
       // 收件箱键盘 triage：无修饰键 T/M/S，仅作用于当前选中任务。
       if (view.type === 'inbox' && selected && !mod && !e.shiftKey && !e.altKey) {
@@ -204,7 +228,7 @@ export default function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [selected, quickAddOpen, searchOpen, settingsOpen, view])
+  }, [selected, quickAddOpen, searchOpen, settingsOpen, view, commandOpen])
 
   useEffect(() => {
     if (!selected) return
@@ -212,7 +236,7 @@ export default function App(): React.JSX.Element {
       const target = event.target
       if (!(target instanceof Element)) return
       if (target.closest('.detail')) return
-      if (target.closest('.task-row, .cal-item, .agenda-row, .week-task, .search-row')) return
+      if (target.closest('.task-row, .cal-item, .agenda-row, .week-task, .search-row, .toast')) return
       selectTask(null)
     }
     document.addEventListener('click', closeOnUnrelatedClick)
@@ -231,7 +255,17 @@ export default function App(): React.JSX.Element {
       {quickAddOpen && <QuickAdd />}
       {searchOpen && <SearchPalette />}
       {settingsOpen && <SettingsModal />}
-      {toast && <div className="toast">{toast}</div>}
+      <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} />
+      {toast && (
+        <div className="toast">
+          {toast}
+          {undoLabel && (
+            <button className="toast-undo" onClick={() => void undo()}>
+              撤销
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
