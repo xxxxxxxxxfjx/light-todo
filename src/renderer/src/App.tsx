@@ -4,6 +4,7 @@ import { TitleBar } from './components/TitleBar'
 import { Sidebar } from './components/Sidebar'
 import { TaskList } from './components/TaskList'
 import { CalendarView } from './components/CalendarView'
+import { WeeklyReview } from './components/WeeklyReview'
 import { DetailPanel } from './components/DetailPanel'
 import { QuickAdd } from './components/QuickAdd'
 import { SearchPalette } from './components/SearchPalette'
@@ -249,8 +250,14 @@ export default function App(): React.JSX.Element {
       <div className={`shell ${selected ? 'has-detail' : ''} ${sidebarOpen ? 'navigation-open' : ''}`}>
         {sidebarOpen && <button className="sidebar-backdrop" aria-label="关闭侧栏" onClick={closeSidebar}/>}
         <Sidebar />
-        {view.type === 'calendar' ? <CalendarView /> : <TaskList />}
-        {(view.type !== 'calendar' || selected) && <DetailPanel />}
+        {view.type === 'calendar' ? (
+          <CalendarView />
+        ) : view.type === 'review' ? (
+          <WeeklyReview />
+        ) : (
+          <TaskList />
+        )}
+        {((view.type !== 'calendar' && view.type !== 'review') || selected) && <DetailPanel />}
       </div>
       {quickAddOpen && <QuickAdd />}
       {searchOpen && <SearchPalette />}

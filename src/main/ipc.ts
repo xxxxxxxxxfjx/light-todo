@@ -27,6 +27,7 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle('sidebar:get', () => db.getSidebar())
+  ipcMain.handle('review:get', () => db.getWeeklyReview())
 
   ipcMain.handle('tasks:list', (_e, opts: Parameters<typeof db.listTasks>[0]) => db.listTasks(opts))
   ipcMain.handle('tasks:get', (_e, id: string) => db.getTask(id))

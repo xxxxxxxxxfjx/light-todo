@@ -5,8 +5,10 @@ import { Check, ChevronLeft, ChevronRight, ChevronsUpDown, Plus } from 'lucide-r
 import { zhCN } from 'date-fns/locale'
 import { useStore } from '../store'
 import { parseLocalDate } from '../lib/format'
+import { calendarAnnotation } from '../lib/lunar'
 import type { Task } from '@shared/types'
 import { WeekView } from './WeekView'
+import '../lunar.css'
 
 const WEEK = ['一', '二', '三', '四', '五', '六', '日']
 type Mode = 'month' | 'week' | 'day'
@@ -320,8 +322,9 @@ export function CalendarView(): React.JSX.Element {
     const key = format(d, 'yyyy-MM-dd')
     const list = byDay.get(key) ?? []
     const visible = visibleMonthItems(list.length)
-    return <div key={key} role="gridcell" aria-selected={key === date} aria-label={`${key}，${list.length}项任务`} tabIndex={key === date ? 0 : -1} data-date={key} className={`cal-cell ${isSameMonth(d,monthDate) ? '' : 'dim'} ${isToday(d) ? 'today' : ''} ${key === date ? 'selected-day' : ''}`} onClick={() => choose(key)} onDoubleClick={() => openQuickAdd('',key)} onDragOver={e => e.preventDefault()} onDrop={async e => {e.preventDefault(); const id=e.dataTransfer.getData('text/lighttodo-task'); if(id && tasks.some(t => t.id === id)) {choose(key); await updateTask(id,{scheduledDate:key})}}}>
-      <div className="cal-date"><span>{d.getDate()}</span></div>
+    const lunar = calendarAnnotation(d)
+    return <div key={key} role="gridcell" aria-selected={key === date} aria-label={`${key}，${lunar}，${list.length}项任务`} tabIndex={key === date ? 0 : -1} data-date={key} className={`cal-cell ${isSameMonth(d,monthDate) ? '' : 'dim'} ${isToday(d) ? 'today' : ''} ${key === date ? 'selected-day' : ''}`} onClick={() => choose(key)} onDoubleClick={() => openQuickAdd('',key)} onDragOver={e => e.preventDefault()} onDrop={async e => {e.preventDefault(); const id=e.dataTransfer.getData('text/lighttodo-task'); if(id && tasks.some(t => t.id === id)) {choose(key); await updateTask(id,{scheduledDate:key})}}}>
+      <div className="cal-date"><span>{d.getDate()}</span><small className="cal-lunar">{lunar}</small></div>
       <div className="cal-items">
         {list.slice(0, visible).map(t => {
           const dueTime = t.dueAt ? new Date(t.dueAt) : null

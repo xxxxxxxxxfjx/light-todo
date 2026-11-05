@@ -1,6 +1,6 @@
 {
   "name": "lighttodo",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "轻单 LightTodo — Windows 上最快的中文待办",
   "main": "./out/main/index.js",
@@ -16,7 +16,7 @@
     "dist": "node scripts/package-windows.cjs",
     "dist:setup": "electron-vite build && electron-builder --win nsis",
     "dist:zip": "electron-vite build && electron-builder --win dir",
-    "test:unit": "node --experimental-strip-types scripts/test-nlp.ts && node --experimental-strip-types scripts/test-db.ts && node --experimental-strip-types scripts/test-import.ts && node --experimental-strip-types scripts/test-recurrence.ts && node --experimental-strip-types scripts/test-qa-regressions.ts && node --experimental-strip-types scripts/test-bugfix-regressions.ts && node scripts/qa-store-review.mjs && node --experimental-strip-types scripts/test-week-layout.ts && node --experimental-strip-types scripts/test-calendar-range.ts && node --experimental-strip-types scripts/test-reminder.ts && node --experimental-strip-types scripts/test-markdown.ts && node --experimental-strip-types scripts/test-export.ts && node --experimental-strip-types scripts/test-search.ts",
+    "test:unit": "node --experimental-strip-types scripts/test-nlp.ts && node --experimental-strip-types scripts/test-db.ts && node --experimental-strip-types scripts/test-import.ts && node --experimental-strip-types scripts/test-recurrence.ts && node --experimental-strip-types scripts/test-qa-regressions.ts && node --experimental-strip-types scripts/test-bugfix-regressions.ts && node scripts/qa-store-review.mjs && node --experimental-strip-types scripts/test-week-layout.ts && node --experimental-strip-types scripts/test-calendar-range.ts && node --experimental-strip-types scripts/test-reminder.ts && node --experimental-strip-types scripts/test-markdown.ts && node --experimental-strip-types scripts/test-export.ts && node --experimental-strip-types scripts/test-search.ts && node --experimental-strip-types scripts/test-review.ts && node --experimental-strip-types scripts/test-lunar.ts",
     "test:e2e": "node scripts/e2e.mjs",
     "test:flows": "node scripts/e2e-flows.mjs",
     "test:stress": "node --experimental-strip-types scripts/e2e-stress.mjs",

@@ -14,7 +14,8 @@ import type {
   Tag,
   Task,
   UpdateTaskInput,
-  ViewKey
+  ViewKey,
+  WeeklyReviewData
 } from '../shared/types'
 import { DEFAULT_PET_SETTINGS, LEGACY_PET_SETTINGS } from '../shared/pet.ts'
 
@@ -1149,6 +1150,149 @@ export function getSidebar(): SidebarData {
   }
 
   return { folders: getFolders(), lists: getLists(), tags: getTags(), counts }
+}
+
+/**
+ * 近 7 天（含今天，旧→新）的本地复盘统计。
+ *
+ * 日期分组必须在 SQLite 里用 `date(..., 'localtime')`：时间戳统一存 ISO UTC，
+ * 直接截取 UTC 日期会让东八区凌晨完成/创建的任务落到前一天。仅统计未删除任务；
+ * 逾期口径与渲染层 isOverdue 一致：未完成，且截止时间早于当前时刻或计划日早于今天。
+ */
+export function getWeeklyReview(now = new Date()): WeeklyReviewData {
+  const end = startOfDay(now)
+  const start = addDays(end, -6)
+  const firstDay = dayStr(start)
+  const today = dayStr(end)
+
+  const dailyCompleted = conn()
+    .prepare(
+      `SELECT date(completed_at, 'localtime') AS day, COUNT(*) AS count
+       FROM tasks
+       WHERE deleted_at IS NULL AND status = 1 AND completed_at IS NOT NULL
+         AND date(completed_at, 'localtime') BETWEEN ? AND ?
+       GROUP BY day`
+    )
+    .all(firstDay, today) as { day: string; count: number }[]
+
+  const dailyCreated = conn()
+    .prepare(
+      `SELECT date(created_at, 'localtime') AS day, COUNT(*) AS count
+       FROM tasks
+       WHERE deleted_at IS NULL
+         AND date(created_at, 'localtime') BETWEEN ? AND ?
+       GROUP BY day`
+    )
+    .all(firstDay, today) as { day: string; count: number }[]
+
+  const completedByDay = new Map(dailyCompleted.map((row) => [row.day, Number(row.count)]))
+  const createdByDay = new Map(dailyCreated.map((row) => [row.day, Number(row.count)]))
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = dayStr(addDays(start, index))
+    return {
+      date,
+      completed: completedByDay.get(date) ?? 0,
+      created: createdByDay.get(date) ?? 0
+    }
+  })
+
+  const active = Number(
+    (
+      conn()
+        .prepare(
+          `SELECT COUNT(*) AS count FROM tasks
+           WHERE deleted_at IS NULL AND status = 0`
+        )
+        .get() as { count: number | null }
+    ).count ?? 0
+  )
+
+  const overdue = Number(
+    (
+      conn()
+        .prepare(
+          `SELECT COUNT(*) AS count FROM tasks
+           WHERE deleted_at IS NULL AND status = 0
+             AND (
+               (due_at IS NOT NULL AND julianday(due_at) < julianday(?))
+               OR (scheduled_date IS NOT NULL AND scheduled_date < ?)
+             )`
+        )
+        .get(now.toISOString(), today) as { count: number | null }
+    ).count ?? 0
+  )
+
+  const listRows = conn()
+    .prepare(
+      `SELECT l.id, l.name, l.color,
+         SUM(CASE WHEN t.deleted_at IS NULL AND t.status = 1 AND t.completed_at IS NOT NULL
+                   AND date(t.completed_at, 'localtime') BETWEEN ? AND ?
+                  THEN 1 ELSE 0 END) AS completed,
+         SUM(CASE WHEN t.deleted_at IS NULL AND t.status = 0 THEN 1 ELSE 0 END) AS active
+       FROM lists l
+       LEFT JOIN tasks t ON t.list_id = l.id
+       WHERE l.archived_at IS NULL
+       GROUP BY l.id
+       ORDER BY completed DESC, active DESC, l.sort_order ASC, l.created_at ASC`
+    )
+    .all(firstDay, today) as {
+    id: string
+    name: string
+    color: string | null
+    completed: number | null
+    active: number | null
+  }[]
+
+  const lists: WeeklyReviewData['lists'] = listRows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    color: row.color ?? null,
+    completed: Number(row.completed ?? 0),
+    active: Number(row.active ?? 0)
+  }))
+
+  const unclassifiedRow = conn()
+    .prepare(
+      `SELECT
+         SUM(CASE WHEN t.status = 1 AND t.completed_at IS NOT NULL
+                   AND date(t.completed_at, 'localtime') BETWEEN ? AND ?
+                  THEN 1 ELSE 0 END) AS completed,
+         SUM(CASE WHEN t.status = 0 THEN 1 ELSE 0 END) AS active
+       FROM tasks t
+       WHERE t.deleted_at IS NULL
+         AND (
+           t.list_id IS NULL
+           OR NOT EXISTS (
+             SELECT 1 FROM lists l WHERE l.id = t.list_id AND l.archived_at IS NULL
+           )
+         )`
+    )
+    .get(firstDay, today) as { completed: number | null; active: number | null }
+  const unclassified = {
+    id: '',
+    name: '未分类',
+    color: null,
+    completed: Number(unclassifiedRow.completed ?? 0),
+    active: Number(unclassifiedRow.active ?? 0)
+  }
+  // 只有确实存在未分类任务时才展示这一行，避免空库也出现一项“未分类 0/0”。
+  if (unclassified.completed > 0 || unclassified.active > 0) lists.push(unclassified)
+
+  lists.sort(
+    (a, b) =>
+      b.completed - a.completed ||
+      b.active - a.active ||
+      a.name.localeCompare(b.name, 'zh-CN')
+  )
+
+  return {
+    days,
+    completed: days.reduce((sum, day) => sum + day.completed, 0),
+    created: days.reduce((sum, day) => sum + day.created, 0),
+    overdue,
+    active,
+    lists
+  }
 }
 
 function likeSearchTasks(raw: string, limit: number, offset: number): Task[] {

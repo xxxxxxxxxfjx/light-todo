@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
+  BarChart3,
   Calendar,
   CalendarDays,
   CheckCircle2,
@@ -22,6 +23,7 @@ const NAV: { key: ViewKey; label: string; icon: typeof Sun }[] = [
   { key: 'today', label: '今天', icon: Sun },
   { key: 'upcoming', label: '最近 7 天', icon: CalendarDays },
   { key: 'calendar', label: '日历', icon: Calendar },
+  { key: 'review', label: '周复盘', icon: BarChart3 },
   { key: 'all', label: '全部', icon: Layers },
   { key: 'someday', label: '也许', icon: Moon },
   { key: 'completed', label: '已完成', icon: CheckCircle2 },

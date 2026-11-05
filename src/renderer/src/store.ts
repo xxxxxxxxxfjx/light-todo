@@ -26,6 +26,7 @@ const INITIAL_LIMITS: Record<ViewKey, number> = {
   completed: 200,
   trash: 200,
   calendar: -1,
+  review: 0,
   list: 500,
   tag: 500
 }
@@ -165,17 +166,39 @@ export const useStore = create<AppStore>((set, get) => ({
         completed: '已完成',
         trash: '回收站',
         calendar: '日历',
+        review: '周复盘',
         list: '清单',
         tag: '标签'
       } as Record<ViewKey, string>)[type]
     selectionId++
     requestedLimit = 0
+    if (type === 'review') {
+      // 周复盘自己通过 review:get 取数，不能把 review 当成任务视图去查列表。
+      refreshId++
+      set({
+        view: { type, ...opts, title },
+        tasks: [],
+        selected: null,
+        filter: 'all',
+        selectedIds: [],
+        selectMode: false,
+        batchBusy: false,
+        sidebarOpen: false,
+        loading: false,
+        error: ''
+      })
+      return
+    }
     set({ view: { type, ...opts, title }, tasks: [], selected: null, filter: 'all', selectedIds: [], selectMode: false, batchBusy: false, sidebarOpen: false })
     await get().refresh()
   },
 
   refresh: async () => {
     const { view, calendarRange } = get()
+    if (view.type === 'review') {
+      set({ loading: false, error: '' })
+      return
+    }
     const request = ++refreshId
     // The mounted calendar supplies its visible range. Never load the entire
     // historical database while waiting for that first range.
@@ -206,6 +229,7 @@ export const useStore = create<AppStore>((set, get) => ({
   loadMore: async () => {
     if (get().loading) return
     const { view, tasks } = get()
+    if (view.type === 'review') return
     const request = ++refreshId
     // Reserve the page before awaiting so a concurrent refresh cannot shrink
     // the list back to the initial limit and discard this page.

@@ -68,9 +68,9 @@ pnpm typecheck    # 类型检查
 
 > 打包约定：每次完成代码/界面/文档改动后都要执行 `pnpm dist`，不能只交源码；版本号在 `package.json` 中递增，产物在 `release/<version>/`。
 
-当前产物：`release/0.4.0/LightTodo-0.4.0-x64.exe`（直接双击）与
-`release/0.4.0/LightTodo-0.4.0-portable.zip`（完整解压后双击 `LightTodo.exe`）。
-单文件版首次会在同目录释放 `LightTodoApp-0.4.0-<构建标识>`，日常数据保存到同目录 `LightTodoData`。
+当前产物：`release/0.5.0/LightTodo-0.5.0-x64.exe`（直接双击）与
+`release/0.5.0/LightTodo-0.5.0-portable.zip`（完整解压后双击 `LightTodo.exe`）。
+单文件版首次会在同目录释放 `LightTodoApp-0.5.0-<构建标识>`，日常数据保存到同目录 `LightTodoData`。
 启动器先按正常模式运行，并把运行时退出码记录到 `LightTodoData/launcher.log`；受限环境如出现 Chromium 初始化退出码 `0x80000003`，需从命令行加 `--no-sandbox --disable-gpu` 启动。
 构建使用本地 Electron 分发目录及 Windows 自带 .NET Framework C# 编译器。
 
@@ -202,3 +202,8 @@ node scripts/e2e-layout-theme.mjs release/0.2.9/LightTodo-0.2.9-x64.exe
 ## 0.4.0
 
 日常闭环与知识工作：提醒完成/稍后、错过摘要、Ctrl+Z 撤销、拖拽排序、行内标题编辑；Markdown 预览 + checklist、FTS5 搜索、Ctrl+K 命令面板、CSV / Microsoft To Do / ICS；Windows 任务栏角标。详见 `docs/release-0.4.0.md`。
+
+
+## 0.5.0
+
+周复盘视图、农历/节日/调休标注；沿用 0.4.0 的通知完成/稍后、撤销、拖拽、Markdown、FTS5、命令面板、CSV/MS To Do/ICS 与任务栏角标。详见 `docs/release-0.5.0.md`。

@@ -4,7 +4,8 @@ import type {
   CreateTaskInput,
   List,
   UpdateTaskInput,
-  ViewKey
+  ViewKey,
+  WeeklyReviewData
 } from '../shared/types'
 
 const api = {
@@ -36,6 +37,9 @@ const api = {
   },
   sidebar: {
     get: () => ipcRenderer.invoke('sidebar:get')
+  },
+  review: {
+    get: (): Promise<WeeklyReviewData> => ipcRenderer.invoke('review:get')
   },
   tasks: {
     list: (opts: { view: ViewKey; listId?: string; tagId?: string; limit?: number; offset?: number; dateFrom?: string; dateTo?: string }) =>

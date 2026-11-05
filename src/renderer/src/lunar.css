@@ -1,0 +1,21 @@
+/* Lunar/festival annotation inside calendar day cells. */
+.calendar-main .cal-lunar {
+  margin-left: 3px;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 38px;
+}
+.calendar-main .cal-cell.today .cal-lunar {
+  color: #fff;
+  opacity: 0.9;
+}
+.calendar-main .cal-cell.selected-day:not(.today) .cal-lunar {
+  color: var(--accent);
+}
+@media (max-width: 980px) {
+  .calendar-main .cal-lunar { display: none; }
+}

@@ -7,8 +7,25 @@ export type ViewKey =
   | 'completed'
   | 'trash'
   | 'calendar'
+  | 'review'
   | 'list'
   | 'tag'
+
+export interface WeeklyReviewData {
+  /** 最近 7 天，从旧到新（今天在最后）。 */
+  days: { date: string; completed: number; created: number }[]
+  completed: number
+  created: number
+  overdue: number
+  active: number
+  lists: {
+    id: string
+    name: string
+    color: string | null
+    completed: number
+    active: number
+  }[]
+}
 
 export interface Tag {
   id: string
