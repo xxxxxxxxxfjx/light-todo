@@ -67,7 +67,7 @@ pnpm typecheck    # 类型检查
 当前产物：`release/0.2.13/LightTodo-0.2.13-x64.exe`（直接双击）与
 `release/0.2.13/LightTodo-0.2.13-portable.zip`（完整解压后双击 `LightTodo.exe`）。
 单文件版首次会在同目录释放 `LightTodoApp-0.2.13-<构建标识>`，日常数据保存到同目录 `LightTodoData`。
-启动器先按正常模式运行；仅在观察到当前受限 Windows 环境的 Chromium 初始化退出码 `0x80000003` 时，自动以兼容模式重试，并在 `launcher.log` 留下记录。
+启动器先按正常模式运行，并把运行时退出码记录到 `LightTodoData/launcher.log`；受限环境如出现 Chromium 初始化退出码 `0x80000003`，需从命令行加 `--no-sandbox --disable-gpu` 启动。
 构建使用本地 Electron 分发目录及 Windows 自带 .NET Framework C# 编译器。
 
 开发数据默认放在项目下 `.data/`，安装版放在 `%APPDATA%/LightTodo/`，便携版放在 exe 同目录 `LightTodoData/`。
