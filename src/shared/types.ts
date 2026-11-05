@@ -14,6 +14,8 @@ export type ViewKey =
 export interface WeeklyReviewData {
   /** 最近 7 天，从旧到新（今天在最后）。 */
   days: { date: string; completed: number; created: number }[]
+  /** 最近约 13 周的完成热力图，按周一对齐，最后一天是今天。 */
+  heatmap: { date: string; completed: number }[]
   completed: number
   created: number
   overdue: number

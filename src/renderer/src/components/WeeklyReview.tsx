@@ -78,6 +78,7 @@ export function WeeklyReview(): React.JSX.Element {
   }, [])
 
   const days = data?.days ?? fallbackDays
+  const heatmap = data?.heatmap ?? []
   const maxValue = Math.max(1, ...days.flatMap((day) => [day.completed, day.created]))
   const todayKey = days[days.length - 1]?.date ?? format(new Date(), 'yyyy-MM-dd')
   const rangeText = dateRangeText(days[0]?.date, days[days.length - 1]?.date)
@@ -186,6 +187,7 @@ export function WeeklyReview(): React.JSX.Element {
                 </button>
               </div>
             ) : (
+              <>
               <div className="review-grid">
                 <section className="review-panel review-chart-panel" aria-labelledby="review-chart-title">
                   <div className="review-panel-head">
@@ -290,6 +292,38 @@ export function WeeklyReview(): React.JSX.Element {
                   </div>
                 </section>
               </div>
+
+              <section className="review-panel review-heatmap-panel" aria-labelledby="review-heatmap-title">
+                <div className="review-panel-head">
+                  <div>
+                    <h2 id="review-heatmap-title">完成热力图</h2>
+                    <p>最近 13 周，每格代表一天；颜色越深完成越多</p>
+                  </div>
+                  <div className="review-heatmap-legend" aria-label="热力图图例">
+                    <span>少</span>
+                    <i className="level-0" /><i className="level-1" /><i className="level-2" /><i className="level-3" />
+                    <span>多</span>
+                  </div>
+                </div>
+                {heatmap.length === 0 ? (
+                  <div className="review-list-empty">还没有完成记录。</div>
+                ) : (
+                  <div className="review-heatmap" role="list" aria-label="最近完成热力图">
+                    {heatmap.map((day) => {
+                      const date = parseLocalDate(day.date)
+                      const level = day.completed === 0 ? 0 : day.completed < 2 ? 1 : day.completed < 4 ? 2 : 3
+                      return <span
+                        key={day.date}
+                        role="listitem"
+                        className={`review-heat-cell level-${level} ${day.date === todayKey ? 'is-today' : ''}`}
+                        title={`${format(date, 'M月d日')}：完成 ${day.completed} 项`}
+                        aria-label={`${format(date, 'M月d日')} 完成 ${day.completed} 项`}
+                      />
+                    })}
+                  </div>
+                )}
+              </section>
+              </>
             )}
           </>
         ) : null}

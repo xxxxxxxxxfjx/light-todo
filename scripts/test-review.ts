@@ -136,6 +136,14 @@ assert.deepEqual(
 )
 console.log('PASS 按 date(..., \'localtime\') 分组并补齐 0')
 
+// 2.1 13 周热力图：按周一对齐、最后一天是今天，完成总数与复盘一致。
+assert.ok(review.heatmap.length >= 91, `热力图至少 91 天，实际 ${review.heatmap.length}`)
+assert.equal(review.heatmap.at(-1)?.date, '2026-11-05')
+assert.equal(review.heatmap.slice(-7).reduce((sum, day) => sum + day.completed, 0), review.completed, '热力图最后 7 天应与周复盘完成数一致')
+assert.equal(review.heatmap.find((day) => day.date === '2026-11-05')?.completed, 1)
+assert.equal(new Date(`${review.heatmap[0].date}T00:00:00`).getDay(), 1, '热力图应从周一开始')
+console.log('PASS 13 周完成热力图（周一对齐、最后一天为今天）')
+
 // 3) 顶部指标。
 assert.equal(review.completed, 2, '最近 7 天完成应为 2')
 assert.equal(review.created, 7, '最近 7 天新增应为 7')

@@ -467,6 +467,20 @@
   font-size: 11.5px;
 }
 
+/* 13-week completion heatmap */
+.review-heatmap-panel { margin-top: 14px; }
+.review-heatmap-legend { display: flex; align-items: center; gap: 3px; padding-top: 3px; color: var(--text-3); font-size: 10px; white-space: nowrap; }
+.review-heatmap-legend i { width: 9px; height: 9px; display: inline-block; border-radius: 2px; background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.review-heatmap-legend .level-1 { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+.review-heatmap-legend .level-2 { background: color-mix(in srgb, var(--accent) 52%, transparent); }
+.review-heatmap-legend .level-3 { background: color-mix(in srgb, var(--accent) 82%, transparent); }
+.review-heatmap { display: grid; grid-auto-flow: column; grid-auto-columns: 12px; grid-template-rows: repeat(7, 12px); gap: 3px; padding: 12px 0 4px; overflow-x: auto; scrollbar-width: thin; }
+.review-heat-cell { width: 12px; height: 12px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.review-heat-cell.level-1 { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+.review-heat-cell.level-2 { background: color-mix(in srgb, var(--accent) 52%, transparent); }
+.review-heat-cell.level-3 { background: color-mix(in srgb, var(--accent) 82%, transparent); }
+.review-heat-cell.is-today { outline: 1px solid var(--accent); outline-offset: 1px; }
+
 @media (max-width: 980px) {
   .review-grid {
     grid-template-columns: minmax(0, 1fr);

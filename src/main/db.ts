@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { addDays, format, isValid, parseISO, startOfDay } from 'date-fns'
+import { addDays, format, isValid, parseISO, startOfDay, startOfWeek } from 'date-fns'
 import rrulePkg from 'rrule'
 
 const { RRule } = rrulePkg
@@ -1217,7 +1217,9 @@ export function getWeeklyReview(now = new Date()): WeeklyReviewData {
   const firstDay = dayStr(start)
   const today = dayStr(end)
 
-  const dailyCompleted = conn()
+  // 一次查询覆盖 7 天节奏和 13 周热力图，避免重复扫描完成历史。
+  const heatmapStart = dayStr(startOfWeek(addDays(end, -90), { weekStartsOn: 1 }))
+  const completedRows = conn()
     .prepare(
       `SELECT date(completed_at, 'localtime') AS day, COUNT(*) AS count
        FROM tasks
@@ -1225,7 +1227,7 @@ export function getWeeklyReview(now = new Date()): WeeklyReviewData {
          AND date(completed_at, 'localtime') BETWEEN ? AND ?
        GROUP BY day`
     )
-    .all(firstDay, today) as { day: string; count: number }[]
+    .all(heatmapStart, today) as { day: string; count: number }[]
 
   const dailyCreated = conn()
     .prepare(
@@ -1237,7 +1239,7 @@ export function getWeeklyReview(now = new Date()): WeeklyReviewData {
     )
     .all(firstDay, today) as { day: string; count: number }[]
 
-  const completedByDay = new Map(dailyCompleted.map((row) => [row.day, Number(row.count)]))
+  const completedByDay = new Map(completedRows.map((row) => [row.day, Number(row.count)]))
   const createdByDay = new Map(dailyCreated.map((row) => [row.day, Number(row.count)]))
   const days = Array.from({ length: 7 }, (_, index) => {
     const date = dayStr(addDays(start, index))
@@ -1247,6 +1249,12 @@ export function getWeeklyReview(now = new Date()): WeeklyReviewData {
       created: createdByDay.get(date) ?? 0
     }
   })
+
+  const heatmap: WeeklyReviewData['heatmap'] = []
+  for (let cursor = startOfWeek(addDays(end, -90), { weekStartsOn: 1 }); cursor <= end; cursor = addDays(cursor, 1)) {
+    const key = dayStr(cursor)
+    heatmap.push({ date: key, completed: completedByDay.get(key) ?? 0 })
+  }
 
   const active = Number(
     (
@@ -1339,6 +1347,7 @@ export function getWeeklyReview(now = new Date()): WeeklyReviewData {
 
   return {
     days,
+    heatmap,
     completed: days.reduce((sum, day) => sum + day.completed, 0),
     created: days.reduce((sum, day) => sum + day.created, 0),
     overdue,
