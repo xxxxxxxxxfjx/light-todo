@@ -362,6 +362,24 @@ await runScenario(
 )
 
 await runScenario(
+  'quick-add-template',
+  [
+    { js: `document.querySelector('.new-task')?.click()`, wait: 300 },
+    { js: setText('.qa-input', '明天下午3点 周会 #工作 @汇报 !高'), wait: 300 },
+    { js: `document.querySelector('.qa-template-save')?.click()`, wait: 500 },
+    { js: `(() => { const value = document.querySelector('.qa-input'); const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set; set.call(value, ''); value.dispatchEvent(new Event('input', { bubbles: true })); return document.querySelectorAll('.qa-template-chip').length })()`, wait: 100 },
+    { js: `document.querySelector('.qa-template-apply')?.click()`, wait: 300 },
+    { js: `({ value: document.querySelector('.qa-input')?.value, chips: [...document.querySelectorAll('.qa-template-chip')].map((e) => e.textContent) })`, wait: 100 }
+  ],
+  ({ db, out }) => {
+    assert(out.results.at(-1).value.includes('周会'), '点击模板后应回填原始输入')
+    assert(out.results.at(-1).chips.length === 1, '应展示一个模板 chip')
+    const setting = one(db, `SELECT value FROM settings WHERE key = 'quick_add_templates'`)
+    assert(!!setting && JSON.parse(setting.value).length === 1, '模板应写入 settings')
+  }
+)
+
+await runScenario(
   'filter-high',
   [
     { js: `document.querySelector('.new-task').click()`, wait: 300 },

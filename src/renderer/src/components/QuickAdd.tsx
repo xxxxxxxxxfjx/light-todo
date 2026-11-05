@@ -6,6 +6,13 @@ import { dateLabel, parseLocalDate } from '../lib/format'
 import { repeatLabel } from '../lib/repeat'
 import { useStore } from '../store'
 import { mod } from '../lib/platform'
+import {
+  TEMPLATE_SETTING_KEY,
+  addTemplate,
+  parseTemplates,
+  removeTemplate,
+  type QuickAddTemplate
+} from '../lib/templates'
 
 function Chip({
   icon: Icon,
@@ -38,6 +45,7 @@ export function QuickAdd(): React.JSX.Element {
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false)
   const [text, setText] = useState(quickAddInitial)
+  const [templates, setTemplates] = useState<QuickAddTemplate[]>([])
   const ref = useRef<HTMLTextAreaElement>(null)
   const parsed = useMemo(() => parseQuickAdd(text), [text])
   // The calendar's picked day is the anchor: a time-only phrase such as “9:00”
@@ -67,7 +75,35 @@ export function QuickAdd(): React.JSX.Element {
 
   useEffect(() => {
     ref.current?.focus()
+    window.api.settings.get(TEMPLATE_SETTING_KEY).then((raw) => setTemplates(parseTemplates(raw))).catch(() => undefined)
   }, [])
+
+  const saveTemplate = async (): Promise<void> => {
+    if (!text.trim()) return
+    const next = addTemplate(templates, text)
+    setTemplates(next)
+    try {
+      await window.api.settings.set(TEMPLATE_SETTING_KEY, JSON.stringify(next))
+      showToast('已存为模板')
+    } catch {
+      showToast('模板保存失败')
+    }
+  }
+
+  const applyTemplate = (template: QuickAddTemplate): void => {
+    setText(template.text)
+    ref.current?.focus()
+  }
+
+  const deleteTemplate = async (id: string): Promise<void> => {
+    const next = removeTemplate(templates, id)
+    setTemplates(next)
+    try {
+      await window.api.settings.set(TEMPLATE_SETTING_KEY, JSON.stringify(next))
+    } catch {
+      showToast('模板删除失败')
+    }
+  }
 
   const submit = async (keepOpen = false): Promise<void> => {
     const trimmed = text.trim()
@@ -199,6 +235,18 @@ export function QuickAdd(): React.JSX.Element {
           </button>
         </div>
 
+        {templates.length > 0 && (
+          <div className="qa-templates" aria-label="快速添加模板">
+            <span className="qa-templates-label">模板</span>
+            {templates.map((template) => (
+              <span className="qa-template-chip" key={template.id}>
+                <button className="qa-template-apply" onClick={() => applyTemplate(template)} title={template.text}>{template.name}</button>
+                <button className="qa-template-remove" aria-label={`删除模板：${template.name}`} onClick={() => void deleteTemplate(template.id)}><X size={10} /></button>
+              </span>
+            ))}
+          </div>
+        )}
+
         {(parsed.scheduledDate || parsed.dueAt || parsed.priority || parsed.listName || parsed.tagNames.length > 0 || parsed.rrule || quickAddDate || previewSomeday) && (
           <div className="qa-chips">
             {previewSomeday && (
@@ -228,10 +276,8 @@ export function QuickAdd(): React.JSX.Element {
           <span>
             <kbd>{mod}</kbd> + <kbd>Enter</kbd> 继续添加
           </span>
-          <span>
-            <kbd>Esc</kbd> 取消
-          </span>
-          <span className="qa-syntax">支持：明天 / 每周一 / 每月5号 / !高 / #清单 / @标签</span>
+          <button className="qa-template-save" title="保存当前输入为模板" disabled={!text.trim()} onClick={() => void saveTemplate()}>存模板</button>
+          <span className="qa-syntax">支持：明天 / 每周一 / !高 / #清单 / @标签</span>
           <button className="qa-submit" disabled={saving} onClick={() => submit(false)}>
             {saving ? '保存中…' : '添加'}
           </button>
