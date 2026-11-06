@@ -11,6 +11,13 @@
 - 旧脚本 `scripts/e2e*.mjs` 保留为回归兜底，新用例优先用 Playwright MCP。
 - **临时文件统一放 `.tmp/`**：`.tmp/data`（开发数据）、`.tmp/qa`（单元/QA）、`.tmp/e2e`（E2E）、`.tmp/perf`（基准）、`.tmp/shots`（截图）、`.tmp/logs`（日志）、`.tmp/cache`（缓存）、`.tmp/archive`（旧目录归档）。不要再往仓库根目录创建点开头临时目录。
 
+## 提交约定（重要）
+
+- **每次调整结束都必须提交代码，不能只留在工作区。**
+- 默认流程：`git add -A` → `git commit -m "<说明>"` → `git push origin main`；提交后确认 `git status -sb` 干净且 `main...origin/main` 已同步。
+- 每次提交后在回复中报告 commit hash；用户明确说“先不提交/不推送”时，以用户当次指令为准。
+- 打包产物在 `release/`（已被 `.gitignore` 忽略）不进入 Git，但交付时仍要报告路径、大小与 `checksums.json`。
+
 ## 构建 / 校验
 
 ```bash
