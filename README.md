@@ -32,7 +32,7 @@ Windows 上最快的中文待办 —— 本地优先、键盘优先、开箱即�
 - 性能验收：干净 Win11 打包版冷启动 P50 <1s / P95 <2s、常驻 <150MB、1 万条滚动 60fps 仍需在可启动 Electron 的交互式会话实测
 - 第 2 阶段后续：通知“完成/稍后”、撤销、拖拽排序、行内标题编辑
 - 第 3 阶段：Markdown 预览/checklist、FTS5 搜索、命令面板、CSV/MS To Do/ICS
-- 代码签名、自动更新（可选）
+- 代码签名、自动更新（可选）；更新与数据持久化方案见 `docs/software-update-research.md`
 
 ## 技术栈
 
