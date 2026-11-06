@@ -1,20 +1,21 @@
 # 软件更新与数据持久化技术方案调研
 
 > 调研日期：2026-11-06  
-> 适用版本：LightTodo 0.6.10（Electron 45 / electron-builder 26）  
-> 结论先行：**先修“数据根”，再谈“自动更新”。** 数据必须从 exe 所在目录迁到稳定的用户目录；更新优先选 NSIS + electron-updater，若必须保留单文件便携 exe，则把现有 C# 启动器升级成“启动器内更新器”。  
+> 适用版本：LightTodo 0.6.10（Electron 45 / electron-builder 26，Windows + macOS）  
+> 结论先行：**先修“数据根”，再谈“自动更新”。** 数据必须从 exe 所在目录迁到稳定的用户目录；更新优先选 **Windows NSIS + macOS DMG/ZIP + electron-updater**；如果 Windows 必须保留单文件便携 exe，再把现有 C# 启动器升级成“启动器内更新器”（macOS 没有等价“单文件免安装”形态，仍走 electron-updater）。  
 > 说明：本文是基于当前代码与官方文档的方案调研，**未实际改造代码、未搭建更新服务器**；目录/清单/时序是建议实现，落地前需按第 10 节做端到端验证。
 
 ---
 
-## 0. 四个问题的直接回答
+## 0. 五个问题的直接回答
 
 | 问题 | 结论 |
 | --- | --- |
-| 安装包出来了放哪里？ | 放在**固定 HTTPS 地址的对象存储 + CDN** 上（国内首选阿里云 OSS / 腾讯云 COS），按“渠道 / 平台 / 版本”分目录；客户端只读一个稳定的 `latest.json`（或 `latest.yml`）。GitHub Releases 只适合做海外镜像或备用源，不建议作为国内主源。 |
-| 怎么通知用户可以更新？ | 不需要推送服务。客户端启动后延迟检查 + 每 6～24 小时轮询一次清单，发现新版本后在**应用内横幅 / 设置页“关于” / 托盘菜单**提示；下载完成后提示“重启并安装”。只有 App 正在运行才能弹 Windows 通知，App 没启动时靠下次启动检查。 |
-| 用户点击更新后怎么安装、怎么重启？ | **NSIS 路线**：electron-updater 下载 Setup → 校验 → `quitAndInstall()` → NSIS 静默安装到同一 per-user 目录 → 自动启动新版本。**便携路线**：下载新版 payload → 写 `pending.json` → App 以约定退出码退出 → 启动器校验并解压到新的版本目录 → 原子切换 `state.json` → 重启；旧版本目录保留一份用于回滚。 |
-| 数据还是用之前的吗？ | 是，但前提是**数据根不再跟着 exe 走**。默认改为 `%LOCALAPPDATA%\LightTodo\data`，升级只替换程序目录，永不触碰数据目录；首次升级时从旧的 `LightTodoData` 做一次带校验的复制迁移，并在升级前自动备份数据库。 |
+| 安装包出来了放哪里？ | 放在**固定 HTTPS 地址的对象存储 + CDN** 上（国内首选阿里云 OSS / 腾讯云 COS），按“渠道 / 平台 / 架构”分目录：Windows 放 `latest.yml`，macOS 放 `latest-mac.yml`；客户端只读各自平台的稳定清单。GitHub Releases 只适合做海外镜像或备用源，不建议作为国内主源。 |
+| 怎么通知用户可以更新？ | 不需要推送服务。客户端启动后延迟检查 + 每 6～24 小时轮询一次清单，发现新版本后在**应用内横幅 / 设置页“关于” / 托盘或 macOS 菜单栏**提示；下载完成后提示“重启并安装”。只有 App 正在运行才能弹系统通知，App 没启动时靠下次启动检查。 |
+| 需要做更新界面吗？ | **需要，但只需要轻量 UI**：设置页“关于”里的版本/检查按钮 + 更新横幅 + 下载进度/重启提示 + 更新说明弹窗。不需要独立窗口或复杂页面。 |
+| 用户点击更新后怎么安装、怎么重启？ | **Windows NSIS**：electron-updater 下载 Setup → 校验 → `quitAndInstall()` → NSIS 静默安装到同一 per-user 目录 → 自动启动新版本。**macOS**：electron-updater 下载签名/公证过的 ZIP → 替换 `/Applications/LightTodo.app` → 自动重启。**Windows 便携路线**：下载新版 payload → 写 `pending.json` → App 以约定退出码退出 → 启动器校验并解压到新的版本目录 → 原子切换 `state.json` → 重启；旧版本目录保留一份用于回滚。 |
+| 数据还是用之前的吗？ | 是，但前提是**数据根不再跟着 exe 走**。Windows 默认改为 `%LOCALAPPDATA%\LightTodo\data`，macOS 默认 `~/Library/Application Support/LightTodo/data`；升级只替换程序目录，永不触碰数据目录；首次升级时从旧的 `LightTodoData` 做一次带校验的复制迁移，并在升级前自动备份数据库。 |
 
 ---
 
@@ -85,54 +86,57 @@ if (dataRootOverride) {
 
 **必须做到：**
 
-1. 换版本、换目录、重装程序，都不丢用户数据；
-2. 用户不点“下一步”、不需要管理员权限也能更新；
-3. 更新失败不能把旧版本弄坏，必须可回滚；
-4. 更新包必须可校验（哈希/签名），不能被中间人替换；
-5. 无网络时 App 仍可正常使用，更新检查失败要静默；
-6. 国内网络可下载，更新服务器成本可控；
-7. 兼容现有便携版用户，不能要求他们手工找数据库。
+1. Windows 和 macOS 双平台都能更新，版本节奏一致；
+2. 换版本、换目录、重装程序，都不丢用户数据；
+3. Windows 不需要管理员权限；macOS 首次拖入 `/Applications` 后，后续更新不再要求用户手动操作；
+4. 更新失败不能把旧版本弄坏，必须可回滚；
+5. 更新包必须可校验（哈希/签名），不能被中间人替换；
+6. 无网络时 App 仍可正常使用，更新检查失败要静默；
+7. 国内网络可下载，更新服务器成本可控；
+8. 兼容现有 Windows 便携版用户，不能要求他们手工找数据库。
 
 **明确不做的：**
 
 - 不做账号体系/云同步（本期只解决本机持久化）；
 - 不做后台常驻更新服务（不装 Windows 服务、不写计划任务）；
-- 不做强制自动安装（默认让用户确认重启）。
+- 不做强制自动安装（默认让用户确认重启）；
+- 不做 Mac App Store 版本（本期按 DMG 直发设计；MAS 是另一条更新链路）。
 
 ---
 
 ## 3. 两条路线对比
 
-| 维度 | 路线 A：NSIS 安装版 + electron-updater | 路线 B：单文件便携版 + 启动器自更新 |
+| 维度 | 路线 A：Windows NSIS + macOS DMG/ZIP + electron-updater | 路线 B：Windows 单文件便携版 + 启动器自更新 |
 | --- | --- | --- |
-| 用户是否要安装 | 要，装一次；之后自动更新 | 不要，继续保持双击 exe |
-| 更新实现 | 官方 `electron-updater`，Windows 只支持 NSIS | 自研：manifest + 下载 + 启动器解压切换 |
-| 开发量 | 小（约 2～4 天，含联调） | 中（约 1～2 周，含回滚/自替换/测试） |
-| 更新体积 | 支持 blockmap 差分，通常几 MB～几十 MB | 默认全量 payload ~164 MB；可再做文件级差分 |
-| 安装/更新权限 | per-user 安装可免 UAC；per-machine 需要 UAC | 免安装，但要求 exe 所在目录可写 |
+| 用户是否要安装 | Windows 装一次；macOS 把 App 拖进 `/Applications` | 仅 Windows，继续保持双击 exe |
+| 更新实现 | 官方 `electron-updater`，Windows 用 NSIS，macOS 用 ZIP 载荷 | 自研：manifest + 下载 + 启动器解压切换 |
+| 开发量 | 小（约 3～5 天，含双平台联调/签名） | 中（约 1～2 周，含回滚/自替换/测试），且只解决 Windows |
+| 更新体积 | 支持 blockmap 差分（Windows）；macOS 用 ZIP，通常几十 MB | 默认全量 payload ~164 MB；可再做文件级差分 |
+| 安装/更新权限 | Windows per-user 可免 UAC；macOS 要求 App 在可写位置（通常 `/Applications`） | 免安装，但要求 exe 所在目录可写 |
 | 回滚 | electron-updater 无自动回滚，只能发更高版本；可保留旧安装包 | 可保留上一版目录，启动器可直接回退 |
-| 代码签名 | 需要（否则 SmartScreen 拦截） | 同样需要 |
-| 适用 | 大多数消费级 Windows 软件 | “绿色软件/放 U 盘”是产品卖点时 |
+| 代码签名 | Windows 需 Authenticode；macOS 必须 Developer ID + 公证（否则 Gatekeeper 拦截，且无法自动更新） | 同样需要 |
+| macOS 是否适用 | **适用**，且是 macOS 唯一推荐路线 | **不适用**，macOS 没有等价“单文件免安装 exe” |
+| 适用 | 大多数消费级 Windows/macOS 软件 | Windows“绿色软件/放 U 盘”是产品卖点时 |
 
 **推荐决策树：**
 
 ```text
-能接受用户安装一次？
-├─ 是 → 路线 A：NSIS per-user + electron-updater（首选，最稳、最省开发）
-└─ 否 → 路线 B：保留单文件 exe，启动器自更新（次选，工作量大但体验不变）
+Windows 是否必须保持“双击 exe、不安装”？
+├─ 否 → 路线 A：Windows NSIS + macOS DMG/ZIP + electron-updater（双平台首选）
+└─ 是 → Windows 走路线 B；macOS 仍走路线 A（DMG/ZIP + electron-updater）
 ```
 
 > 不管选 A 还是 B，**第 4 节的数据根方案都必须先做**。否则更新做得再好，用户换一个目录仍然“数据没了”。
 
 **推荐组合（如果由我来落地）：**
 
-1. 数据根先迁到 `%LOCALAPPDATA%\LightTodo\data`，旧数据一次性导入（P1，先发一个补丁版）；
-2. 主分发改为 **NSIS per-user 安装包 + electron-updater**，保留 portable ZIP 作为“绿色版”；
-3. 更新文件放阿里云 OSS + CDN，`latest.yml` 短缓存、版本文件不可变；
+1. 数据根先迁到 Windows `%LOCALAPPDATA%\LightTodo\data` / macOS `~/Library/Application Support/LightTodo/data`，旧数据一次性导入（P1，先发一个补丁版）；
+2. 主分发改为 **Windows NSIS per-user + macOS DMG/ZIP + electron-updater**；Windows portable ZIP 只作为“绿色版”保留；
+3. 更新文件放阿里云 OSS + CDN（海外可用 Cloudflare R2 镜像），`latest.yml` / `latest-mac.yml` 短缓存、版本文件不可变；
 4. 应用内“检查更新”+ 下载进度 + “重启并安装”，灰度 5% → 25% → 100%；
-5. 补代码签名；没有签名之前，至少做清单 Ed25519 + SHA-256 校验。
+5. 补代码签名：Windows OV/EV，macOS Developer ID + 公证；没有签名之前，至少做清单 Ed25519 + SHA-256 校验。
 
-这样每次发版仍然会产出一个新的 `LightTodo-Setup-x.y.z.exe`，但**用户不再需要自己找安装包、手动覆盖**；安装器只替换程序目录，数据目录始终不动。
+这样每次发版仍会产出新的 `LightTodo-Setup-x.y.z.exe` 和 `LightTodo-x.y.z.dmg`，但**用户不再需要自己找安装包、手动覆盖**；安装器只替换程序目录，数据目录始终不动。
 
 ---
 
@@ -156,7 +160,21 @@ if (dataRootOverride) {
   install.json              # 安装标识、数据根、schema 版本
 ```
 
-**便携模式（显式开启，适合 U 盘）：**
+**macOS 默认：**
+
+```text
+~/Library/Application Support/LightTodo/
+  data\
+    lighttodo.db
+    backups\
+    files\
+  session\
+  logs\
+  updates\
+  install.json
+```
+
+**便携模式（仅 Windows，显式开启，适合 U 盘）：**
 
 ```text
 <exeDir>\
@@ -194,11 +212,12 @@ app.setPath('sessionData', join(root, 'session'))
 
 ### 4.3 老用户迁移（一次性）
 
-首次运行 0.7.x 时，如果 `%LOCALAPPDATA%\LightTodo\data\lighttodo.db` 不存在，按以下顺序找旧数据：
+首次运行 0.7.x 时，如果 `%LOCALAPPDATA%\LightTodo\data\lighttodo.db`（macOS 为 `~/Library/Application Support/LightTodo/data/lighttodo.db`）不存在，按以下顺序找旧数据：
 
-1. 当前 exe 同目录的 `LightTodoData\lighttodo.db`；
-2. `%APPDATA%\LightTodo\lighttodo.db`（旧安装版）；
-3. 用户手动选择的目录（设置页“导入旧数据”）。
+1. 当前 exe 同目录的 `LightTodoData\lighttodo.db`（Windows 便携版）；
+2. `%APPDATA%\LightTodo\lighttodo.db`（旧 Windows 安装版）；
+3. macOS 旧 `~/Library/Application Support/LightTodo/lighttodo.db`；
+4. 用户手动选择的目录（设置页“导入旧数据”）。
 
 找到后弹窗，明确展示：
 
@@ -219,6 +238,8 @@ app.setPath('sessionData', join(root, 'session'))
 
 失败处理：删除临时文件，保留旧库与旧目录，弹窗给出日志路径；下次启动可重试。
 
+macOS 当前默认数据目录已经是 `~/Library/Application Support/LightTodo`，只是 DB 直接放在根目录、没有 `data/` 子目录；迁移时把旧库复制到 `data/lighttodo.db`，`Local Storage` 从旧 `Local Storage` 复制到新 `session/Local Storage`，然后保留旧文件一个版本周期。
+
 ### 4.4 数据分层
 
 | 层 | 内容 | 丢失后果 | 升级策略 |
@@ -232,7 +253,7 @@ app.setPath('sessionData', join(root, 'session'))
 
 ---
 
-## 5. 路线 A：NSIS 安装版 + electron-updater（推荐）
+## 5. 路线 A：Windows NSIS + macOS DMG/ZIP + electron-updater（推荐）
 
 ### 5.1 官方支持边界
 
@@ -297,9 +318,16 @@ release/0.7.0/
   LightTodo-0.7.0-x64.exe          # 便携版，可选
   LightTodo-0.7.0-portable.zip     # 绿色版，可选
   checksums.json
+
+release/mac-0.7.0/
+  LightTodo-0.7.0-arm64.dmg        # macOS 首次安装
+  LightTodo-0.7.0-arm64-mac.zip    # macOS 自动更新载荷
+  latest-mac.yml
+  LightTodo-0.7.0-x64.dmg          # Intel（如支持）
+  LightTodo-0.7.0-x64-mac.zip
 ```
 
-`latest.yml` 是 electron-updater 的清单，包含版本、文件名、`sha512`、大小、`stagingPercentage` 等；`.blockmap` 用于差分下载。把这三个文件上传到同一个 HTTPS 目录即可。
+`latest.yml` 是 Windows electron-updater 的清单，`latest-mac.yml` 是 macOS 的清单；两者都包含版本、文件名、`sha512`、大小等。`.blockmap` 用于 Windows 差分下载；macOS 用 ZIP 载荷。把平台对应的清单和产物上传到同一个 HTTPS 域名的平台目录即可。
 
 ### 5.4 客户端更新逻辑（主进程）
 
@@ -351,7 +379,7 @@ closeDb()
 autoUpdater.quitAndInstall(false, true)
 ```
 
-`quitAndInstall()` 会关闭所有窗口、启动 NSIS 安装器（`--updated /S`），安装完成后按参数重启应用。数据目录不在安装目录里，所以安装器不会碰它。
+`quitAndInstall()` 在 Windows 上会关闭所有窗口、启动 NSIS 安装器（`--updated /S`），安装完成后按参数重启应用；在 macOS 上则替换 `/Applications/LightTodo.app` 并重启。数据目录不在安装目录里，所以安装器/替换过程不会碰它。
 
 ### 5.5 通知与 UI
 
@@ -369,12 +397,75 @@ autoUpdater.quitAndInstall(false, true)
 
 - electron-updater **没有自动回滚**：坏版本只能发更高版本修复；staged rollout（`stagingPercentage`）可以降低命中率，但不能撤回已安装用户；
 - per-machine 安装需要 UAC；如果用户坚持装到 `Program Files`，更新会弹权限框；
-- 代码签名必须做，否则 SmartScreen 会拦下载/运行；
-- 企业环境（GPO/SCCM/Intune）应发 MSI 或 `msi-wrapped`，不要指望 electron-updater 管纯 MSI。
+- Windows 代码签名必须做，否则 SmartScreen 会拦下载/运行；macOS 必须 Developer ID + 公证，否则 Gatekeeper 会拦，自动更新也无法工作；
+- 企业环境（GPO/SCCM/Intune）应发 MSI 或 `msi-wrapped`，不要指望 electron-updater 管纯 MSI。macOS 企业分发可考虑 PKG/MDM，但这是另一条链路。
+
+### 5.7 macOS：同一套 electron-updater 的配置
+
+macOS 和 Windows 共用 `src/main/updater.ts` 的状态机与 UI，差异只在打包/签名：
+
+```json
+{
+  "mac": {
+    "target": [
+      { "target": "dmg", "arch": ["arm64", "x64"] },
+      { "target": "zip", "arch": ["arm64", "x64"] }
+    ],
+    "category": "public.app-category.productivity",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "build/entitlements.mac.plist",
+    "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+    "notarize": true,
+    "artifactName": "LightTodo-${version}-${arch}.${ext}"
+  }
+}
+```
+
+要点：
+
+- **DMG 用于首次安装，ZIP 用于自动更新**。electron-builder 默认的 macOS target 就是 `zip` + `dmg`，两个都要产出；只发 DMG 不会有 `latest-mac.yml`，electron-updater 无法更新。
+- **必须用 Developer ID Application 证书签名，并完成 Apple 公证（notarization）**。macOS 10.15+ 上“只签名不公证”的 App 仍会被 Gatekeeper 拦截；未签名的 App 无法使用 Squirrel.Mac/electron-updater 自动更新。
+- `hardenedRuntime: true`（默认）+ 正确的 entitlements（V8 需要 `com.apple.security.cs.allow-jit` 等）；`gatekeeperAssess: false` 是 electron-builder 的默认值。
+- 当前 `scripts/package-mac.cjs` 只构建 **arm64**，并且 `identity: null` + ad-hoc 签名（`codesign --sign -`）。这只能本地预览，**不能作为对外分发/自动更新产物**；需要改成 Developer ID 签名 + 公证，并补 x64 或 universal。
+- **安装位置**：用户应把 `LightTodo.app` 拖到 `/Applications`。从 DMG 挂载目录或 Downloads 直接运行会触发 App Translocation，更新器可能无法替换 App；首次启动时检测 `app.isInApplicationsFolder()`，不在就提示“请拖到 Applications 后再更新”。
+- **架构**：Apple Silicon（arm64）和 Intel（x64）都建议出包。`universal` 包体积约翻倍；如果用户量允许，按架构分别出包更省更新流量。`latest-mac.yml` 会按构建产物生成；每个架构单独目录最清晰。
+- **Mac App Store**：如果走 `mas` target，更新由 App Store 负责，不能用 electron-updater；这是另一条分发路线，不要和 DMG 直发混用。
+
+macOS 用户点击更新后的流程与 Windows 类似，只是“安装器”变成替换 `.app`：
+
+```text
+checkForUpdates → update-available → downloadUpdate（ZIP）
+→ 校验签名/哈希 → update-downloaded
+→ quitAndInstall() → 关闭 App → 替换 /Applications/LightTodo.app → 重新启动
+```
+
+数据目录在 `~/Library/Application Support/LightTodo/data`，不在 `.app` 内，替换 App 不会影响数据。
+
+### 5.8 双平台发布流水线
+
+```text
+GitHub Actions / CI matrix:
+  windows-latest:
+    - pnpm dist:setup        # NSIS + latest.yml
+    - pnpm dist              # portable exe/zip（可选）
+  macos-14:
+    - pnpm dist:mac          # arm64 DMG + ZIP + latest-mac.yml
+  macos-13:
+    - pnpm dist:mac          # x64 DMG + ZIP（或 universal 一次构建）
+
+上传:
+  /updates/stable/win-x64/latest.yml
+  /updates/stable/mac-arm64/latest-mac.yml
+  /updates/stable/mac-x64/latest-mac.yml
+  /updates/stable/<platform>/releases/<version>/...
+```
+
+注意：`latest.yml`（Windows）和 `latest-mac.yml`（macOS）由 electron-builder 生成，不要手写；每个平台用各自的 `publish.url`（CI 里按平台覆盖），避免客户端拿错清单。发布前在干净的 Win11 和 macOS（arm64 + Intel 各一台，或至少 arm64）上各跑一次“旧版 → 新版”升级演练。
 
 ---
 
-## 6. 路线 B：单文件便携版 + 启动器自更新（保留绿色版）
+## 6. 路线 B：Windows 单文件便携版 + 启动器自更新（保留绿色版）
 
 ### 6.1 为什么不能“直接覆盖正在运行的 exe”
 
@@ -550,6 +641,17 @@ Windows 上正在运行的 exe 是 image section，**不能删除、不能原地
 
 对 LightTodo 这种“Electron 运行时不变、主要改 app.asar”的应用，**文件级增量的性价比最高**。
 
+### 6.8 为什么 macOS 没有“路线 B”
+
+macOS 没有“单文件便携 exe”这个概念：
+
+- App 是一个 `.app` bundle（目录），必须放在用户可写的位置（通常 `/Applications`）；
+- DMG 只是首次安装的磁盘镜像，不能直接当“更新包”替换运行中的 App；
+- 从 DMG/Downloads 直接运行会触发 App Translocation（随机只读路径），更新器无法原地替换；
+- macOS 的自动更新要求 App 已用 Developer ID 签名并公证，Squirrel.Mac/electron-updater 才能替换 bundle。
+
+所以 macOS 直接分发只有一条推荐路线：**DMG 首次安装 + ZIP 更新载荷 + electron-updater + Developer ID/公证**。如果不想维护这套签名/公证，就只能走 Mac App Store（更新由 Store 负责），但那就不是现在的 DMG 分发模式了。
+
 ---
 
 ## 7. 安装包/更新文件放哪里
@@ -565,7 +667,7 @@ Windows 上正在运行的 exe 是 image section，**不能删除、不能原地
 | GitHub Releases | 慢/时常不可达 | 免费 | 无 | 海外镜像、开发者下载 |
 | 百度网盘/蓝奏云 | 好 | 免费 | 无 | **只能做手动备用，不能做自动更新源** |
 
-**建议：** 主源用阿里云 OSS + CDN（`https://dl.lighttodo.cn`，需备案），GitHub Releases 做镜像；清单里配置 `mirrors`，客户端主源失败自动切换。
+**建议：** 主源用阿里云 OSS + CDN（`https://dl.lighttodo.cn`，需备案），GitHub Releases 做镜像；清单里配置 `mirrors`，客户端主源失败自动切换。macOS 用户如果主要在海外，建议加一个 Cloudflare R2 / 海外 CDN 镜像，或者用 Cloudflare Worker 按地区 302 到最近源；只靠国内 CDN 的海外节点，macOS 下载体验可能一般。
 
 ### 7.2 目录与缓存策略
 
@@ -575,19 +677,38 @@ Windows 上正在运行的 exe 是 image section，**不能删除、不能原地
 https://dl.lighttodo.cn/updates/
   stable/
     win-x64/
-      latest.json                         # 自定义更新器：短缓存 no-cache / max-age=60，带 ETag
-      latest.yml                          # NSIS/electron-updater：短缓存，构建时生成
+      latest.yml                          # Windows/electron-updater：短缓存，构建时生成
+      latest.json                         # 仅 Windows 便携自定义更新器需要
       releases/
         0.7.0/
-          LightTodo-0.7.0-payload.zip     # 不可变：max-age=31536000, immutable
-          LightTodo-0.7.0-x64.exe         # 完整包（启动器更新时用）
+          LightTodo-Setup-0.7.0.exe
+          LightTodo-Setup-0.7.0.exe.blockmap
+          LightTodo-0.7.0-payload.zip     # 便携版更新载荷
           notes.md
           sha256sums.txt
         0.6.10/
           ...
+    mac-arm64/
+      latest-mac.yml                      # macOS/electron-updater：短缓存
+      releases/
+        0.7.0/
+          LightTodo-0.7.0-arm64.dmg       # 首次安装
+          LightTodo-0.7.0-arm64-mac.zip   # 自动更新载荷
+          notes.md
+          sha256sums.txt
+    mac-x64/
+      latest-mac.yml
+      releases/
+        0.7.0/
+          LightTodo-0.7.0-x64.dmg
+          LightTodo-0.7.0-x64-mac.zip
   beta/
     win-x64/
-      latest.json
+      latest.yml
+    mac-arm64/
+      latest-mac.yml
+    mac-x64/
+      latest-mac.yml
 ```
 
 规则：
@@ -604,17 +725,17 @@ https://dl.lighttodo.cn/updates/
 ```text
 1. 改 package.json version（patch/minor）
 2. pnpm typecheck && pnpm test:unit && pnpm test:launcher
-3. pnpm dist / pnpm dist:setup
-4. 生成 latest.json / latest.yml + Ed25519 签名
+3. Windows：pnpm dist:setup（NSIS）；macOS：pnpm dist:mac（DMG + ZIP，签名 + 公证）
+4. 生成/收集 latest.yml、latest-mac.yml，生成 Ed25519 签名（自定义更新器）
 5. 上传版本文件（不可变路径）
-6. 上传/刷新 latest.json（短缓存）
-7. 冒烟：新机器下载 → 安装/解压 → 启动 → 数据目录正确
+6. 上传/刷新 latest.yml、latest-mac.yml（短缓存）
+7. 冒烟：Windows 新机器安装/解压 → 启动 → 数据目录正确；macOS DMG 拖入 Applications → 启动 → 升级演练
 8. 可选：5% → 25% → 100% 灰度
 ```
 
 CI 里不要把 OSS AccessKey 写进仓库；用环境变量/密钥管理。构建产物 `release/` 已被 `.gitignore` 忽略，不要提交 164 MB 的 exe。**`release/<version>/` 只是本机构建目录，不是分发渠道**；对外分发要上传到对象存储/CDN，不要把 Git 仓库、聊天群文件或网盘当作自动更新源。
 
-### 7.4 代码签名与 SmartScreen
+### 7.4 Windows 代码签名与 SmartScreen
 
 这是更新方案能不能“看起来正规”的关键：
 
@@ -633,13 +754,22 @@ CI 里不要把 OSS AccessKey 写进仓库；用环境变量/密钥管理。构�
 
 ### 7.5 成本估算
 
-以 164 MB/次全量更新为例：
+以 Windows 164 MB/次全量更新为例：
 
 - 1,000 次下载 ≈ 164 GB；CDN 按 ¥0.2/GB ≈ **¥33/次发布**；
 - 10,000 次下载 ≈ 1.6 TB ≈ **¥330/次发布**；
 - 存储保留 5 个版本 ≈ 1 GB，可忽略。
 
-如果做文件级增量（大多只有十几 MB），成本会降一个数量级。
+macOS 的 ZIP 通常也在几十到一百多 MB（取决于是否 universal），两个平台加起来按“Windows + macOS”分别估算；如果做文件级增量（大多只有十几 MB），成本会降一个数量级。
+
+### 7.6 macOS 的签名、公证与托管注意
+
+- 需要 **Apple Developer Program**（$99/年）和 **Developer ID Application** 证书；`CSC_LINK` / `CSC_KEY_PASSWORD` 放 CI secret。
+- 需要 **公证（notarization）**：electron-builder 可配置 `notarize: true`，使用 `APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`；也可以用 `xcrun notarytool` + `xcrun stapler staple` 手动完成。只签名不公证，macOS 10.15+ 仍会被 Gatekeeper 拦截。公证完成后建议对 DMG 执行 `xcrun stapler staple LightTodo-<version>-<arch>.dmg`，离线首次安装也能通过 Gatekeeper。
+- DMG 和 ZIP 都要签名/公证；**自动更新用的是 ZIP**，DMG 只负责首次安装。`latest-mac.yml` 由 electron-builder 在 zip target 下生成。
+- 托管时确保 `.dmg` 的 `Content-Type` 是 `application/x-apple-diskimage`，`.zip` 是 `application/zip`；对象存储默认可能给 `application/octet-stream`，部分浏览器/下载器体验会差，但不影响 electron-updater。
+- 如果同时出 arm64 和 x64，建议 `mac-arm64/` 与 `mac-x64/` 两套目录、两套 `latest-mac.yml`；不要把一个架构的清单给另一个架构用。universal 包可以只放 `mac-universal/`，但体积更大。
+- Mac App Store 走 `mas` target，更新由 App Store 负责，不使用 electron-updater；不要和 DMG 直发混在同一套清单里。
 
 ---
 
@@ -692,6 +822,48 @@ POST https://dl.lighttodo.cn/updates/events
 ```
 
 不要采集任务内容、文件名、账号等隐私数据；在隐私政策里说明；失败静默，不能影响更新。
+
+### 8.5 双平台更新界面：需要，但不用做“大界面”
+
+结论：**需要做，但只需要一个轻量的“更新中心”，不需要独立窗口。** 最小可用集合：
+
+```text
+设置 → 关于
+┌──────────────────────────────────────┐
+│ 轻单 LightTodo  0.7.0 (build 20261110) │
+│ 更新通道：稳定版        [检查更新]      │
+│ [✓] 自动检查更新    上次检查：2 分钟前  │
+└──────────────────────────────────────┘
+
+主窗口右下角（有新版本时）
+┌──────────────────────────────────────┐
+│ 新版本 0.7.0 可用 · 12.4 MB            │
+│ • 数据固定保存，换版本不丢              │
+│ • 支持应用内更新                       │
+│ [查看更新内容]  [稍后]  [下载]          │
+└──────────────────────────────────────┘
+```
+
+1. **设置 → 关于**：当前版本、构建号、渠道（stable/beta）、上次检查时间、`检查更新` 按钮、`自动检查更新` 开关；
+2. **更新横幅**：有新版本时出现在主窗口右下角/顶部，不阻塞当前操作；文案包含版本号、大小、3 条更新要点；
+3. **更新说明弹窗**：点击“查看更新内容”打开，展示 `notes.md` 的安全渲染结果，底部 [稍后] [下载]；
+4. **下载进度**：横幅/设置页显示百分比、速度、剩余时间，可取消；
+5. **重启提示**：下载完成后 [立即重启] [退出时安装]；macOS 文案可以是“重启 App 完成更新”；
+6. **错误提示**：只在用户主动检查时弹出；后台检查失败静默写日志。
+
+不需要：
+
+- 独立“更新器窗口”或常驻更新服务；
+- 复杂的版本历史页面（官网发布页即可）；
+- 强制全屏广告式弹窗。
+
+平台差异：
+
+- **Windows**：托盘菜单加“检查更新…”；标题栏/右下角横幅；`Notification` 走 Windows Toast。
+- **macOS**：App 菜单加“检查更新…”（符合 macOS 习惯），`app.setAboutPanelOptions` 里放版本/版权；横幅用同一个组件；`Notification` 走通知中心。
+- 两端共用 `UpdateState` 和 React 组件，只在“安装动作”上分叉：Windows 调 `quitAndInstall()` 或启动器；macOS 调 `quitAndInstall()`。
+
+如果完全不想做 UI，也可以只用 `checkForUpdatesAndNotify()` 弹系统通知、下载后退出时安装；但用户看不到进度/更新说明，出错也不知道，**不推荐**作为正式产品的唯一方案。
 
 ---
 
@@ -771,9 +943,9 @@ db.exec(`VACUUM INTO '${backupPath.replaceAll("'", "''")}'`)
 
 ### 9.5 便携模式 / 多用户 / OneDrive
 
-- **便携模式**：只有 exe 旁存在 `portable.flag` 才用 `<exeDir>\LightTodoData`；设置页明确提示“便携模式数据随目录走，换目录请手动迁移”；
-- **多用户**：`%LOCALAPPDATA%` 按 Windows 用户隔离，天然支持多用户；共享旧目录由每个用户各自导入副本，不要搬走共享库；
-- **OneDrive**：检测数据根在 OneDrive/网络路径时，提示“活动数据库不能放在同步盘”，建议改到本地；只把备份快照放 OneDrive；
+- **便携模式（仅 Windows）**：只有 exe 旁存在 `portable.flag` 才用 `<exeDir>\LightTodoData`；设置页明确提示“便携模式数据随目录走，换目录请手动迁移”；
+- **多用户**：Windows `%LOCALAPPDATA%` / macOS `~/Library/Application Support` 都按用户隔离，天然支持多用户；共享旧目录由每个用户各自导入副本，不要搬走共享库；
+- **OneDrive/iCloud Drive**：检测数据根在同步盘/网络路径时，提示“活动数据库不能放在同步盘”，建议改到本地；只把备份快照放同步盘；
 - **只读目录**：exe 在 `Program Files`/只读 U 盘时，数据仍写 `%LOCALAPPDATA%`；但便携更新需要 exe 目录可写，不可写就提示改用安装版或搬到用户目录。
 
 ### 9.6 更新时数据安全的顺序
@@ -804,8 +976,10 @@ db.exec(`VACUUM INTO '${backupPath.replaceAll("'", "''")}'`)
 6. 哈希/签名错误：拒绝安装，旧版本不受影响；
 7. 解压中途断电：`.tmp` 目录下次启动清理，`state.json` 仍指向旧版本；
 8. 新版本启动失败：回退上一版，提示日志路径；
-9. 只读 exe 目录：数据仍在 LocalAppData，更新提示改用安装版；
-10. 卸载：默认保留数据；重装后数据还在。
+9. 只读目录：数据仍在 LocalAppData，更新提示改用安装版；
+10. 卸载：默认保留数据；重装后数据还在；
+11. macOS：DMG 拖入 `/Applications` 后首次启动无 Gatekeeper 拦截；从 DMG 直接运行时提示先拖入；
+12. macOS：更新只替换 `.app`，`~/Library/Application Support/LightTodo/data` 中的任务数不变。
 
 ---
 
@@ -818,15 +992,15 @@ db.exec(`VACUUM INTO '${backupPath.replaceAll("'", "''")}'`)
 | P0 | 定方案：是否接受 NSIS、是否买签名、主源域名 | 决策记录 | 0.5 天 |
 | P1 | 数据根固定 + 旧数据迁移 + 设置页展示 | 0.6.11，先解决“换 exe 丢数据” | 2～3 天 |
 | P2 | 更新清单 + 检查/通知 UI + 托管/上传脚本 | 能发现新版本（先不自动装） | 1～2 天 |
-| P3-A | NSIS per-user + electron-updater 全链路 | 0.7.0 自动更新 | 2～4 天 |
-| P3-B | 便携启动器自更新 + 回滚（若选 B） | 0.7.0 绿色版自动更新 | 1～2 周 |
+| P3-A | Windows NSIS + macOS DMG/ZIP + electron-updater 全链路 | 0.7.0 双平台自动更新 | 3～5 天 |
+| P3-B | 仅 Windows 便携启动器自更新 + 回滚（若选 B） | 0.7.0 Windows 绿色版自动更新 | 1～2 周 |
 | P4 | 文件级增量、灰度、更新统计 | 降低带宽/风险 | 2～3 天 |
 
 **建议先发 P1**：只改数据根，不动更新。这样即使更新方案还在讨论，用户“换新 exe 数据没了”的痛点已经解决；P1 也是 P3 的基础。
 
 ### 10.2 代码改动清单（P1）
 
-- `src/main/index.ts`：数据根解析、`app.setPath('userData'/'sessionData')`、日志路径；
+- `src/main/index.ts`：数据根解析（Windows `%LOCALAPPDATA%` / macOS `Application Support`）、`app.setPath('userData'/'sessionData')`、日志路径；
 - `src/main/data.ts`：`VACUUM INTO` 备份、迁移前备份；
 - `src/main/db.ts`：`application_id`、`user_version`、迁移 runner、降级保护；
 - 新增 `src/main/data-root.ts`：解析/迁移/`install.json`；
@@ -838,6 +1012,9 @@ db.exec(`VACUUM INTO '${backupPath.replaceAll("'", "''")}'`)
 ### 10.3 代码改动清单（P3-A）
 
 - `package.json`：`electron-updater` 进 `dependencies`，`publish` 配置，NSIS `oneClick/perMachine`；
+- `package.json` 的 `mac.target` 改为 `dmg` + `zip`（arm64 + x64 或 universal），补 `entitlements.mac*.plist`、`hardenedRuntime: true`、`notarize: true`；CI 加 Apple 证书/公证 secret；
+- 新增 `build/entitlements.mac.plist` / `build/entitlements.mac.inherit.plist`（V8 JIT 等）；
+- `scripts/package-mac.cjs`：去掉 `identity: null`/ad-hoc，改为 Developer ID 签名 + 公证，并补 x64 或 universal；
 - 新增 `src/main/updater.ts`：状态机、IPC、`quitAndInstall`；
 - `src/preload/index.ts`：`updater` API；
 - `src/renderer/src/components/SettingsModal.tsx`：关于/检查更新；
@@ -855,26 +1032,38 @@ db.exec(`VACUUM INTO '${backupPath.replaceAll("'", "''")}'`)
 ### 10.5 发布检查清单
 
 - [ ] `pnpm typecheck` / `pnpm test:unit` / `pnpm test:launcher` 通过；
-- [ ] 版本号递增，`checksums.json` 生成；
-- [ ] 清单签名、哈希校验通过；
-- [ ] 旧版本 → 新版本升级演练通过；
+- [ ] 版本号递增，Windows/macOS `checksums.json` 生成；
+- [ ] Windows 清单/哈希、macOS `latest-mac.yml`/公证校验通过；
+- [ ] 旧版本 → 新版本升级演练通过（Windows + macOS）；
 - [ ] 回滚演练通过；
-- [ ] `latest.json` CDN 缓存已刷新；
-- [ ] 官网下载页读取的是同一个清单；
+- [ ] `latest.yml`、`latest-mac.yml` CDN 缓存已刷新；
+- [ ] 官网下载页读取的是同一套清单；
 - [ ] 发布说明、隐私政策（如加统计）更新。
+
+### 10.6 双平台验收清单
+
+- [ ] Windows：NSIS per-user 安装不弹 UAC；`latest.yml` 可下载；旧版 → 新版升级后任务数不变；
+- [ ] Windows：便携版更新只替换 `LightTodoApp-*`，`%LOCALAPPDATA%\LightTodo\data` 不变；
+- [ ] macOS：DMG 拖入 `/Applications` 首次启动无 Gatekeeper 拦截；`spctl -a -vv` 通过；
+- [ ] macOS：`latest-mac.yml` + ZIP 能被 electron-updater 识别；旧版 → 新版替换 `.app` 后数据仍在；
+- [ ] macOS：从 DMG/Downloads 直接运行时提示“请拖到 Applications”，不尝试原地更新；
+- [ ] 两端：无网络、哈希错误、下载中断、旧版本运行中，均有明确提示且不损坏旧版本；
+- [ ] 两端：更新说明/版本号/渠道展示一致；中文文案不乱码。
 
 ---
 
 ## 11. 风险与待确认
 
-1. **是否接受一次安装？** 这是 A/B 路线的分水岭；如果“绿色免安装”是核心卖点，选 B，但要接受 1～2 周开发量和后续维护。
-2. **代码签名预算**：没有签名，SmartScreen 会显著降低更新成功率；国内主体买 OV/EV 证书需要时间（材料审核、硬件令牌/云 HSM）。
+1. **是否接受一次安装？** Windows 如果“绿色免安装”是核心卖点，选 B；macOS 没有等价形态，仍走 A（DMG + ZIP + electron-updater）。
+2. **代码签名预算**：Windows 没签名 SmartScreen 会显著降低更新成功率；macOS 必须有 Apple Developer Program（$99/年）+ Developer ID + 公证，否则 Gatekeeper 直接拦截，自动更新也无法工作。
 3. **域名与备案**：国内主源需要 ICP 备案；没有备案可先用 OSS 默认域名过渡，但长期建议自有域名。
-4. **用户规模/带宽**：全量 164 MB 在大规模下成本高；确定用户量后决定是否做文件级增量。
+4. **用户规模/带宽**：全量 164 MB（Windows）/ macOS ZIP 通常几十 MB，大规模下成本高；确定用户量后决定是否做文件级增量。
 5. **旧版本兼容**：0.7.0 迁移 schema 时必须向前兼容一个版本；否则用户误开旧 exe 可能写坏数据。
 6. **更新服务器可用性**：单源故障会让所有检查失败；用 CDN + 镜像 + 客户端静默重试，不要把更新检查做成启动阻塞。
 7. **杀毒软件**：自解压/替换 exe 容易被误报；签名、固定发布者、少做“释放 exe 到临时目录”的动作。
 8. **Windows 版本**：Electron 45 需要 Windows 10 及以上；更新清单可加 `minOS`，但不要假装支持 Win7。
+9. **macOS 架构**：至少覆盖 Apple Silicon；Intel Mac 是否还要支持决定要不要出 x64/universal，直接影响构建时间和更新包体积。
+10. **Mac App Store 与 DMG 直发是两条路线**：MAS 更新由 Store 负责，不能和 electron-updater 混用；先选定一条。
 
 ---
 
@@ -894,31 +1083,37 @@ db.exec(`VACUUM INTO '${backupPath.replaceAll("'", "''")}'`)
    https://www.electron.build/v26/docs/nsis
 6. electron-builder v26 Windows（代码签名、`verifyUpdateCodeSignature`）  
    https://www.electron.build/v26/docs/win
-7. electron-builder v26 Publish（generic / GitHub / S3 provider）  
-   https://www.electron.build/v26/docs/publish
-8. electron-builder Issue #5378：portable target 自动更新未实现  
-   https://github.com/electron-userland/electron-builder/issues/5378
-9. SQLite WAL（网络文件系统不支持；`-wal` 是数据库持久状态的一部分）  
-   https://www.sqlite.org/wal.html
-10. SQLite PRAGMA（`user_version` / `application_id` / `synchronous` / `wal_checkpoint`）  
+7. electron-builder v26 macOS（`zip` + `dmg` 默认 target、Hardened Runtime、entitlements、架构）  
+   https://www.electron.build/v26/docs/mac
+8. electron-builder v26 代码签名（macOS Developer ID + 公证要求、Windows OV/EV）  
+   https://www.electron.build/v26/docs/features/code-signing
+9. electron-builder v26 macOS 公证（notarization 流程）  
+   https://www.electron.build/v26/docs/features/code-signing/notarization
+10. electron-builder v26 Publish（generic / GitHub / S3 provider）  
+    https://www.electron.build/v26/docs/publish
+11. electron-builder Issue #5378：portable target 自动更新未实现  
+    https://github.com/electron-userland/electron-builder/issues/5378
+12. SQLite WAL（网络文件系统不支持；`-wal` 是数据库持久状态的一部分）  
+    https://www.sqlite.org/wal.html
+13. SQLite PRAGMA（`user_version` / `application_id` / `synchronous` / `wal_checkpoint`）  
     https://www.sqlite.org/pragma.html
-11. SQLite `VACUUM INTO`（一致快照备份）  
+14. SQLite `VACUUM INTO`（一致快照备份）  
     https://www.sqlite.org/lang_vacuum.html
-12. SQLite Backup API  
+15. SQLite Backup API  
     https://www.sqlite.org/backup.html
-13. SQLite Over a Network（不要把活动库放网络盘）  
+16. SQLite Over a Network（不要把活动库放网络盘）  
     https://www.sqlite.org/useovernet.html
-14. Microsoft Known Folder（Roaming vs Local AppData）  
+17. Microsoft Known Folder（Roaming vs Local AppData）  
     https://learn.microsoft.com/en-us/windows/win32/shell/knownfolderid
-15. Microsoft Artifact Signing Quickstart（Public Trust 地区限制）  
+18. Microsoft Artifact Signing Quickstart（Public Trust 地区限制）  
     https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart
-16. Microsoft SmartScreen（信誉判定）  
+19. Microsoft SmartScreen（信誉判定）  
     https://learn.microsoft.com/en-us/windows/security/operating-system-security/virus-and-threat-protection/microsoft-defender-smartscreen/
-17. Microsoft `MoveFileEx`（`MOVEFILE_DELAY_UNTIL_REBOOT` 限制）  
+20. Microsoft `MoveFileEx`（`MOVEFILE_DELAY_UNTIL_REBOOT` 限制）  
     https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexa
-18. Microsoft “Moving and Replacing Files”（文件必须先关闭）  
+21. Microsoft “Moving and Replacing Files”（文件必须先关闭）  
     https://learn.microsoft.com/en-us/windows/win32/fileio/moving-and-replacing-files
-19. Tauri v2 Updater（静态 JSON + minisign 签名，作为跨框架参考）  
+22. Tauri v2 Updater（静态 JSON + minisign 签名，作为跨框架参考）  
     https://v2.tauri.app/plugin/updater/
-20. Squirrel.Windows（`app-<version>` + `Update.exe`，已不推荐）  
+23. Squirrel.Windows（`app-<version>` + `Update.exe`，已不推荐）  
     https://github.com/Squirrel/Squirrel.Windows
