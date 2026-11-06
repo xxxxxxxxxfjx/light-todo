@@ -45,9 +45,9 @@ export interface IslandState {
 /** 固定舞台尺寸：胶囊在里面形变，窗口本身不动 */
 export const ISLAND_STAGE = { width: 640, height: 420 }
 
-/** 各状态的胶囊尺寸（渲染层与命中判定共用一套） */
+/** 各状态的胶囊尺寸（渲染层与命中判定共用一套；改这里时同步 island.css 的 .phase-*） */
 export const ISLAND_CAPSULE: Record<'rest' | 'peek' | 'panel', { w: number; h: number }> = {
-  rest: { w: 140, h: 30 },
-  peek: { w: 340, h: 58 },
-  panel: { w: 560, h: 360 }
+  rest: { w: 116, h: 24 },
+  peek: { w: 288, h: 46 },
+  panel: { w: 480, h: 312 }
 }

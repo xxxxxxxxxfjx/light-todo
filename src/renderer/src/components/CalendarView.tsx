@@ -96,8 +96,14 @@ export function CalendarView(): React.JSX.Element {
         to: format(endOfWeek(endOfMonth(last), { weekStartsOn: 1 }), 'yyyy-MM-dd')
       }
     }
-    return { from: format(days[0], 'yyyy-MM-dd'), to: format(days[days.length - 1], 'yyyy-MM-dd') }
-  }, [mode, monthKeys, days])
+    // 日/周视图预取整月（含首尾整周）：前后切一天时数据已经就绪，
+    // 不再因为重新查询而先闪一下空列表。跨月时才需要重新取数。
+    const base = parseLocalDate(date)
+    return {
+      from: format(startOfWeek(startOfMonth(base), { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+      to: format(endOfWeek(endOfMonth(base), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+    }
+  }, [mode, monthKeys, date])
 
   useEffect(() => {
     void setCalendarRange(visibleRange.from, visibleRange.to)
@@ -106,7 +112,6 @@ export function CalendarView(): React.JSX.Element {
   useEffect(() => {
     setCalendarDate(date)
     setCalendarJumpDate(null)
-    return () => setCalendarDate(null)
   }, [date, setCalendarDate, setCalendarJumpDate])
 
   // 订阅日程只读：随可见范围拉取，设置里同步/清除后事件会重新加载。
@@ -164,6 +169,9 @@ export function CalendarView(): React.JSX.Element {
 
   const choose = (key: string): void => {
     setDate(key)
+    // 同步写入选中的日期：紧接着点「添加任务」/按 Ctrl+N 时，
+    // 不会读到上一次渲染留下的旧日期（典型症状：任务落回今天）。
+    setCalendarDate(key)
     selectTask(null)
     if (mode === 'month' && key.slice(0, 7) !== visibleMonthKey) {
       ensureMonthVisible(key.slice(0, 7))
@@ -306,7 +314,11 @@ export function CalendarView(): React.JSX.Element {
       }
       if (monthScrollLock.current) return
       // Keep the agenda's selected day inside the month the user is looking at.
-      if (topKey && date.slice(0, 7) !== topKey) setDate(`${topKey}-01`)
+      if (topKey && date.slice(0, 7) !== topKey) {
+        const nextDate = `${topKey}-01`
+        setDate(nextDate)
+        setCalendarDate(nextDate)
+      }
       if (el.scrollTop < 80) prependMonth()
       else if (el.scrollHeight - el.scrollTop - el.clientHeight < 140) appendMonth()
     })
@@ -384,7 +396,7 @@ export function CalendarView(): React.JSX.Element {
         {shownTasks.map(t => {
           const dueTime = t.dueAt ? new Date(t.dueAt) : null
           const showTime = !!dueTime && !Number.isNaN(dueTime.getTime()) && !t.dueAllDay
-          return <button key={t.id} draggable onDragStart={e => e.dataTransfer.setData('text/lighttodo-task',t.id)} className={`cal-item ${t.status === 1 ? 'done' : ''} ${selected?.id === t.id ? 'active' : ''}`} data-p={t.priority} style={{'--task-color': colorOf(t)} as React.CSSProperties} onClick={e => {e.stopPropagation(); setDate(key); selectTask(t.id)}} onDoubleClick={e => e.stopPropagation()} title={`${showTime ? format(dueTime!,'HH:mm') + ' ' : ''}${t.title}`}>
+          return <button key={t.id} draggable onDragStart={e => e.dataTransfer.setData('text/lighttodo-task',t.id)} className={`cal-item ${t.status === 1 ? 'done' : ''} ${selected?.id === t.id ? 'active' : ''}`} data-p={t.priority} style={{'--task-color': colorOf(t)} as React.CSSProperties} onClick={e => {e.stopPropagation(); setDate(key); setCalendarDate(key); selectTask(t.id)}} onDoubleClick={e => e.stopPropagation()} title={`${showTime ? format(dueTime!,'HH:mm') + ' ' : ''}${t.title}`}>
           <i className="cal-dot" style={{background: colorOf(t)}}/>
           <span className="cal-title">{t.title}</span>
           {showTime && <time>{format(dueTime!,'HH:mm')}</time>}
@@ -469,7 +481,9 @@ export function CalendarView(): React.JSX.Element {
             <time>{eventTimeLabel(event)}</time>
           </div>)}
         </div>}
-        {items.length ? <div style={{ height: virtualAgenda.getTotalSize(), position: 'relative' }}>{virtualAgenda.getVirtualItems().map(row => <div key={row.key} style={{ position: 'absolute', top: row.start, left: 0, width: '100%', height: row.size }}>{taskRow(items[row.index])}</div>)}</div> : <div className="agenda-empty"><span>{loading ? '正在加载这个日期的任务…' : `这一天还没有${showDone ? '' : '待办'}任务`}</span>{!loading && <button className="ghost-btn" onClick={() => openQuickAdd('',date)}>为这一天添加安排</button>}</div>}
+        {items.length ? <div style={{ height: virtualAgenda.getTotalSize(), position: 'relative' }}>{virtualAgenda.getVirtualItems().map(row => <div key={row.key} style={{ position: 'absolute', top: row.start, left: 0, width: '100%', height: row.size }}>{taskRow(items[row.index])}</div>)}</div> : loading ? <div className="agenda-loading" role="status" aria-label="正在加载这个日期的任务">
+          <span className="agenda-skeleton"/><span className="agenda-skeleton"/><span className="agenda-skeleton"/>
+        </div> : <div className="agenda-empty"><span>这一天还没有{showDone ? '' : '待办'}任务</span><button className="ghost-btn" onClick={() => openQuickAdd('',date)}>为这一天添加安排</button></div>}
       </div>
     </section>
   </section>

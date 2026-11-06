@@ -1,8 +1,9 @@
 import { Check, Plus, RotateCcw, Sparkles, Trash2 } from 'lucide-react'
-import { useCallback, useLayoutEffect, useMemo, useRef } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useStore, type TaskFilter } from '../store'
 import { TaskRow } from './TaskRow'
+import { DayReport } from './DayReport'
 import { differenceInCalendarDays, format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { parseLocalDate } from '../lib/format'
@@ -33,12 +34,19 @@ const VIRTUAL_THRESHOLD = 150
 const VIRTUAL_OVERSCAN = 10
 const SECTION_HEIGHT_ESTIMATE = 38
 const TASK_HEIGHT_ESTIMATE = 68
+const REPORT_HEIGHT_ESTIMATE = 38
 
 type TaskSection = { key: string; label: string; tasks: Task[] }
 
 type TaskListItem =
   | { kind: 'section'; key: string; label: string; count: number; overdue: boolean }
   | { kind: 'task'; key: string; task: Task }
+  | { kind: 'report'; key: string; dateKey: string; tasks: Task[] }
+
+/** 只有真正的日期分组才生成日报；“无日期”分组跳过。 */
+function isDateKey(key: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(key)
+}
 
 function dayKey(t: Task): string {
   if (t.scheduledDate) return t.scheduledDate
@@ -99,7 +107,7 @@ function buildSections(visible: Task[], viewType: ViewKey): TaskSection[] {
   return sections
 }
 
-function flattenSections(sections: TaskSection[]): TaskListItem[] {
+function flattenSections(sections: TaskSection[], withReport: boolean): TaskListItem[] {
   const items: TaskListItem[] = []
   for (const section of sections) {
     if (section.label) {
@@ -113,6 +121,14 @@ function flattenSections(sections: TaskSection[]): TaskListItem[] {
     }
     for (const task of section.tasks) {
       items.push({ kind: 'task', key: task.id, task })
+    }
+    if (withReport && isDateKey(section.key) && section.tasks.length > 0) {
+      items.push({
+        kind: 'report',
+        key: `report:${section.key}`,
+        dateKey: section.key,
+        tasks: section.tasks
+      })
     }
   }
   return items
@@ -143,30 +159,47 @@ export function TaskList(): React.JSX.Element {
     batchDelete,
     batchRestore,
     batchPurge,
-    batchBusy
+    batchBusy,
+    showToast
   } = useStore()
 
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [openReports, setOpenReports] = useState<Set<string>>(() => new Set())
+
+  const toggleReport = useCallback((dateKey: string) => {
+    setOpenReports((previous) => {
+      const next = new Set(previous)
+      if (next.has(dateKey)) next.delete(dateKey)
+      else next.add(dateKey)
+      return next
+    })
+  }, [])
 
   const visible = useMemo(() => tasks.filter((t) => matchFilter(t, filter)), [tasks, filter])
   const sections = useMemo(() => buildSections(visible, view.type), [visible, view.type])
   const isVirtual = view.type !== 'trash' && visible.length > VIRTUAL_THRESHOLD
   const virtualItems = useMemo(
-    () => (isVirtual ? flattenSections(sections) : []),
-    [isVirtual, sections]
+    () => (isVirtual ? flattenSections(sections, view.type === 'completed') : []),
+    [isVirtual, sections, view.type]
   )
 
   const getScrollElement = useCallback(() => scrollRef.current, [])
   const estimateSize = useCallback(
-    (index: number) =>
-      virtualItems[index]?.kind === 'section' ? SECTION_HEIGHT_ESTIMATE : TASK_HEIGHT_ESTIMATE,
+    (index: number) => {
+      const item = virtualItems[index]
+      if (item?.kind === 'section') return SECTION_HEIGHT_ESTIMATE
+      if (item?.kind === 'report') return REPORT_HEIGHT_ESTIMATE
+      return TASK_HEIGHT_ESTIMATE
+    },
     [virtualItems]
   )
   const getItemKey = useCallback(
     (index: number) => {
       const item = virtualItems[index]
       if (!item) return `missing:${index}`
-      return item.kind === 'section' ? `section:${item.key}` : `task:${item.task.id}`
+      if (item.kind === 'section') return `section:${item.key}`
+      if (item.kind === 'report') return `report:${item.dateKey}`
+      return `task:${item.task.id}`
     },
     [virtualItems]
   )
@@ -418,7 +451,11 @@ export function TaskList(): React.JSX.Element {
                   data-index={virtualRow.index}
                   ref={virtualizer.measureElement}
                   className={`task-virtual-item ${
-                    item.kind === 'section' ? 'task-virtual-section' : 'task-virtual-task'
+                    item.kind === 'section'
+                      ? 'task-virtual-section'
+                      : item.kind === 'report'
+                        ? 'task-virtual-report'
+                        : 'task-virtual-task'
                   }`}
                   style={{ transform: `translateY(${virtualRow.start}px)` }}
                 >
@@ -427,6 +464,14 @@ export function TaskList(): React.JSX.Element {
                       <span>{item.label}</span>
                       <span className="section-count">{item.count}</span>
                     </div>
+                  ) : item.kind === 'report' ? (
+                    <DayReport
+                      dateKey={item.dateKey}
+                      tasks={item.tasks}
+                      open={openReports.has(item.dateKey)}
+                      onToggle={() => toggleReport(item.dateKey)}
+                      onNotify={showToast}
+                    />
                   ) : (
                     <TaskRow task={item.task} />
                   )}
@@ -448,6 +493,15 @@ export function TaskList(): React.JSX.Element {
                   <TaskRow key={t.id} task={t} />
                 ))}
               </div>
+              {view.type === 'completed' && isDateKey(s.key) && s.tasks.length > 0 && (
+                <DayReport
+                  dateKey={s.key}
+                  tasks={s.tasks}
+                  open={openReports.has(s.key)}
+                  onToggle={() => toggleReport(s.key)}
+                  onNotify={showToast}
+                />
+              )}
             </div>
           ))
         )}

@@ -178,7 +178,7 @@ function Island(): React.JSX.Element | null {
       data-island-surface
       onClick={event => {
         if (suppressClick.current) { suppressClick.current = false; return }
-        if ((event.target as Element).closest('button, .capsule-body') || adding) return
+        if ((event.target as Element).closest('button, .capsule-body, .capsule-actions') || adding) return
         const nextPhase: Phase = phaseRef.current === 'panel' ? 'rest' : 'panel'
         setPhase(nextPhase)
         window.islandApi.phase(nextPhase)
@@ -190,7 +190,7 @@ function Island(): React.JSX.Element | null {
       <header
         className="capsule-head"
         onPointerDown={event => {
-          if ((event.target as Element).closest('button') || adding) return
+          if ((event.target as Element).closest('button, .capsule-actions') || adding) return
           dragRef.current = { x: event.screenX, moved: false }
           event.currentTarget.setPointerCapture(event.pointerId)
           window.islandApi.drag('start', event.screenX)
@@ -215,7 +215,7 @@ function Island(): React.JSX.Element | null {
         }}
       >
         <span className={`ring-wrap ${allDone ? 'ok' : stats && stats.overdue > 0 ? 'late' : stats && stats.soon > 0 ? 'soon' : ''}`}>
-          <Ring done={stats?.done ?? 0} total={stats?.total ?? 0} size={phase === 'rest' ? 14 : 18}/>
+          <Ring done={stats?.done ?? 0} total={stats?.total ?? 0} size={phase === 'rest' ? 12 : 16}/>
         </span>
         <span className="count">
           {stats?.done ?? 0}<i>/</i>{stats?.total ?? 0}
@@ -230,16 +230,16 @@ function Island(): React.JSX.Element | null {
           disabled={busy !== null}
           onClick={event => { event.stopPropagation(); void complete(next.id) }}
         ><Check size={13}/></button>}
-        {phase === 'panel' && <>
-          <button className="icon-btn" aria-label="快速添加" title={`新增今天的任务（${modKey('N')}）`}
-            onClick={event => { event.stopPropagation(); setEditingId(null); setDraft(''); setAdding(true); setPhase('panel'); window.islandApi.phase('panel') }}>
-            <Plus size={14}/>
-          </button>
-          <button className="icon-btn quit-btn" aria-label="退出轻单" title="完全退出轻单（包括托盘和任务岛）" onClick={() => window.islandApi.quit()}><X size={14}/></button>
+        {phase === 'panel' && <div className="capsule-actions">
           <button className="head-link" onClick={event => { event.stopPropagation(); window.islandApi.open() }}>
-            <SquareArrowOutUpRight size={12}/><span>打开轻单</span>
+            <SquareArrowOutUpRight size={11}/><span>打开轻单</span>
           </button>
-        </>}
+          <button className="icon-btn add-btn" aria-label="快速添加" title={`新增今天的任务（${modKey('N')}）`}
+            onClick={event => { event.stopPropagation(); setEditingId(null); setDraft(''); setAdding(true); setPhase('panel'); window.islandApi.phase('panel') }}>
+            <Plus size={13}/>
+          </button>
+          <button className="icon-btn quit-btn" aria-label="退出轻单" title="完全退出轻单（包括托盘和任务岛）" onClick={() => window.islandApi.quit()}><X size={13}/></button>
+        </div>}
       </header>
 
       <div className="capsule-body" inert={phase !== 'panel'} aria-hidden={phase !== 'panel'} onClick={event => event.stopPropagation()}>

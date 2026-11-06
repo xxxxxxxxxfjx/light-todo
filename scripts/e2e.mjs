@@ -507,6 +507,27 @@ await runScenario(
   }
 )
 
+// 日视图切到下一天后新增：任务必须落在切后的日期，且不能闪回今天。
+await runScenario(
+  'calendar-day-switch-add',
+  [
+    { js: clickText('.nav-item', '日历'), wait: 800 },
+    { js: clickText('.calendar-modes .seg', '日视图'), wait: 500 },
+    { js: `document.querySelector('.cal-nav [aria-label="下一页"]')?.click()`, wait: 400 },
+    { js: `document.querySelector('.agenda-head .primary-btn')?.click()`, wait: 350 },
+    { js: setText('.qa-input', '日视图切日新增'), wait: 200 },
+    { js: `document.querySelector('.qa-submit')?.click()`, wait: 800 }
+  ],
+  ({ db }) => {
+    const t = one(db, `SELECT * FROM tasks WHERE title='日视图切日新增'`)
+    assert(!!t, '任务未创建')
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    const expected = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`
+    assert(t.scheduled_date === expected, `日视图切日后新增应落在 ${expected}，实际 ${t.scheduled_date}`)
+  }
+)
+
 await runScenario(
   'detail-complete-calendar',
   [
@@ -781,7 +802,7 @@ await runScenario(
   ],
   ({ out }) => {
     assert(out.results[1].search === true, 'Ctrl/Cmd+F 应打开搜索面板')
-    const expected = process.platform === 'darwin' ? '⌘F' : 'Ctrl F'
+    const expected = process.platform === 'darwin' ? '⌘F' : 'Ctrl+F'
     assert(out.results[1].label === expected, `搜索入口应显示 ${expected}`)
   }
 )
