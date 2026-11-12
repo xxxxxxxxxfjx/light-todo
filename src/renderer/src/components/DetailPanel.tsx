@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { CalendarDays, Check, Flag, ListTodo, Moon, Plus, Repeat, Trash2, X } from 'lucide-react'
+import { BellRing, CalendarDays, Check, Flag, ListTodo, Moon, Play, Plus, Repeat, Square, Trash2, X, Zap } from 'lucide-react'
+import type { ListSection } from '@shared/types'
 import { useStore } from '../store'
 import { mod, modKey } from '../lib/platform'
 import { humanDate, isoToLocalInput, localInputToIso, todayStr } from '../lib/format'
@@ -7,6 +8,14 @@ import type { Task } from '@shared/types'
 import { repeatLabel } from '../lib/repeat'
 import { parseMarkdown, toggleChecklistLine } from '../lib/markdown'
 import { MarkdownView } from './MarkdownView'
+
+function minutesLabel(minutes: number | null): string {
+  const value = Math.max(0, Math.round(minutes ?? 0))
+  if (value < 60) return `${value} 分钟`
+  const hours = Math.floor(value / 60)
+  const rest = value % 60
+  return rest ? `${hours} 小时 ${rest} 分钟` : `${hours} 小时`
+}
 
 function Field({
   label,
@@ -33,15 +42,39 @@ export function DetailPanel(): React.JSX.Element {
     toggleTask,
     refresh,
     refreshSidebar,
-    showToast
+    showToast,
+    timer,
+    startTimer,
+    stopTimer
   } = useStore()
   const [title, setTitle] = useState('')
   const [notes, setNotes] = useState('')
   const [notesMode, setNotesMode] = useState<'edit' | 'preview'>('edit')
+  const [sections, setSections] = useState<ListSection[]>([])
   const notesRef = useRef<HTMLTextAreaElement>(null)
   const [tagText, setTagText] = useState('')
   const [subDraft, setSubDraft] = useState('')
   const addingSubtask = useRef(false)
+
+  useEffect(() => {
+    const listId = selected?.listId ?? null
+    if (!listId) {
+      setSections([])
+      return
+    }
+    let alive = true
+    window.api.sections
+      .list(listId)
+      .then((rows) => {
+        if (alive) setSections(rows)
+      })
+      .catch(() => {
+        if (alive) setSections([])
+      })
+    return () => {
+      alive = false
+    }
+  }, [selected?.listId])
 
   useEffect(() => {
     setTitle(selected?.title ?? '')
@@ -195,6 +228,70 @@ export function DetailPanel(): React.JSX.Element {
             </select>
           </Field>
 
+          <Field label="估时">
+            <select
+              aria-label="预计用时"
+              value={task.estimateMin === null ? '' : String(task.estimateMin)}
+              onChange={(e) =>
+                updateTask(task.id, { estimateMin: e.target.value === '' ? null : Number(e.target.value) })
+              }
+            >
+              <option value="">不估时</option>
+              {[15, 30, 45, 60, 90, 120, 180, 240].map((minutes) => (
+                <option key={minutes} value={minutes}>
+                  {minutes >= 60 ? `${minutes / 60} 小时` : `${minutes} 分钟`}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          {sections.length > 0 && (
+            <Field label="分区">
+              <select
+                aria-label="所属分区"
+                value={task.sectionId ?? ''}
+                onChange={(e) => updateTask(task.id, { sectionId: e.target.value || null })}
+              >
+                <option value="">未分区</option>
+                {sections.map((section) => (
+                  <option key={section.id} value={section.id}>
+                    {section.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+
+          <Field label="催办">
+            <div className="inline-controls">
+              <select
+                aria-label="持续提醒"
+                value={task.escalateInterval === null ? '' : String(task.escalateInterval)}
+                onChange={(e) => {
+                  const value = e.target.value === '' ? null : Number(e.target.value)
+                  updateTask(task.id, {
+                    escalateInterval: value,
+                    escalateUntil: value ? new Date(Date.now() + 8 * 3600_000).toISOString() : null
+                  })
+                }}
+              >
+                <option value="">只提醒一次</option>
+                <option value="15">每 15 分钟</option>
+                <option value="30">每 30 分钟</option>
+                <option value="60">每 1 小时</option>
+                <option value="240">每 4 小时</option>
+              </select>
+              <label className="check-inline" title="到点弹置顶强提醒">
+                <input
+                  type="checkbox"
+                  checked={task.urgent}
+                  onChange={(e) => updateTask(task.id, { urgent: e.target.checked })}
+                />
+                紧急
+              </label>
+            </div>
+          </Field>
+
           <Field label="优先级">
             <div className="segmented">
               {[
@@ -243,6 +340,26 @@ export function DetailPanel(): React.JSX.Element {
             </select>
           </Field>
           {task.rrule && <Field label="重复方式"><select aria-label="重复方式" value={task.repeatFrom ?? 'due'} onChange={e => updateTask(task.id,{repeatFrom:e.target.value as 'due' | 'completion'})}><option value="due">按计划日期</option><option value="completion">按完成日期</option></select></Field>}
+        </div>
+
+        <div className="timer-row">
+          <span className="timer-label">
+            <Zap size={13} /> 实际用时 {minutesLabel(task.actualMin)}
+          </span>
+          {timer?.taskId === task.id ? (
+            <button className="inline-action active" onClick={() => void stopTimer()}>
+              <Square size={13} /> 停止计时
+            </button>
+          ) : (
+            <button
+              className="inline-action"
+              onClick={() => startTimer(task.id)}
+              disabled={!!timer}
+              title={timer ? '已有另一个任务在计时' : '开始为这个任务计时'}
+            >
+              <Play size={13} /> 开始计时
+            </button>
+          )}
         </div>
 
         <div className="detail-quick-actions">

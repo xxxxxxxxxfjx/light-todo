@@ -16,6 +16,8 @@ export interface ParsedQuickAdd {
   rrule: string | null
   repeatFrom: 'due' | 'completion' | null
   priority: number
+  /** 预计用时（分钟），来自 `=30m` / `=1h`。 */
+  estimateMin: number | null
   listName: string | null
   tagNames: string[]
   /** True when the text contains an explicit date (“明天”, “3月5日”, …). */
@@ -94,13 +96,19 @@ export function parseQuickAdd(input: string, now: Date = new Date()): ParsedQuic
 
   const tagNames: string[] = []
   for (let i = 0; i < 12; i++) {
-    const m = take(/@([^\s@#!]+)/)
+    const m = take(/@([^\s@#!*]+)/)
     if (!m) break
     tagNames.push(m[1])
   }
+  // Akiflow-style `*标签` alias for tags.
+  for (let i = 0; i < 12; i++) {
+    const m = take(/\*([^\s@#!*]+)/)
+    if (!m) break
+    if (!tagNames.includes(m[1])) tagNames.push(m[1])
+  }
 
   let listName: string | null = null
-  const lm = take(/#([^\s@#!]+)/)
+  const lm = take(/#([^\s@#!*]+)/)
   if (lm) listName = lm[1]
 
   let priority = 0
@@ -111,6 +119,28 @@ export function parseQuickAdd(input: string, now: Date = new Date()): ParsedQuic
     else if (v === '中' || v === '2') priority = 2
     else if (v === '低' || v === '3') priority = 1
     else priority = 0
+  }
+
+  // `=30m` / `=1h` / `=90分钟`：估时。
+  let estimateMin: number | null = null
+  const em = take(/(?:^|\s)=(\d{1,4})\s*(m|min|分钟|分|h|小时)?(?=\s|$)/)
+  if (em) {
+    const raw = Number(em[1])
+    const unit = em[2] ?? ''
+    estimateMin = unit === 'h' || unit === '小时' ? raw * 60 : raw
+    if (!Number.isFinite(estimateMin) || estimateMin <= 0) estimateMin = null
+    else estimateMin = Math.min(estimateMin, 24 * 60)
+  }
+
+  // `>明天` 计划日 / `<周五` 截止日；内容交给同一套中文日期解析。
+  let plannedOverride: string | null = null
+  let deadlineOverride: string | null = null
+  for (let i = 0; i < 2; i++) {
+    const dm = take(/(?:^|\s)([<>])([^\s<>]+)/)
+    if (!dm) break
+    const sub = parseQuickAdd(dm[2], now)
+    if (dm[1] === '>') plannedOverride = sub.scheduledDate
+    else deadlineOverride = sub.scheduledDate
   }
 
   let rrule: string | null = null
@@ -244,43 +274,61 @@ export function parseQuickAdd(input: string, now: Date = new Date()): ParsedQuic
     let d = new Date(today.getFullYear(), Number(m[1]) - 1, Number(m[2]))
     if (d.getTime() < today.getTime()) d = addYears(d, 1)
     dateOnly = d
-  } else if ((m = take(/(\d{1,2})[/-](\d{1,2})/))) {
+  } else if ((m = take(/(?<![\d:])(\d{1,2})[/-](\d{1,2})(?![\d:])/))) {
     let d = new Date(today.getFullYear(), Number(m[1]) - 1, Number(m[2]))
     if (d.getTime() < today.getTime()) d = addYears(d, 1)
     dateOnly = d
   }
   // Only the explicit date keywords above count as a user-chosen date; a
   // time-only expression ("9:00") must not override a calendar pick.
-  const hasExplicitDate = dateOnly !== null
+  const hasExplicitDate = dateOnly !== null || plannedOverride !== null || deadlineOverride !== null
 
   // ── time ──────────────────────────────────────────────
   let hour: number | null = null
   let minute = 0
-  const tm = take(
-    /(凌晨|早上|早晨|上午|中午|下午|傍晚|晚上|夜里)?\s*(\d{1,2}|[一二三四五六七八九十]{1,3})\s*(?:点|时|:)\s*(\d{1,2}|半|[一二三四五六七八九十]{1,3})?\s*分?/
+  let rangeEndHour: number | null = null
+  let rangeEndMinute = 0
+  // 时间段优先：10:00-11:30 / 14:00~15:30 / 9点到10点半
+  const range = take(
+    /(\d{1,2})(?::(\d{2}))?\s*(?:点)?\s*[-–—~～至到]\s*(\d{1,2})(?::(\d{2}))?\s*(?:点|分)?/
   )
-  if (tm) {
-    const period = tm[1]
-    hour = cnToNumber(tm[2])
-    const mm = tm[3]
-    minute = mm ? (mm === '半' ? 30 : cnToNumber(mm)) : 0
-    if (period === '下午' || period === '傍晚' || period === '晚上' || period === '夜里') {
-      if (hour < 12) hour += 12
-    } else if (period === '中午') {
-      if (hour < 11) hour += 12
-    } else if (period === '凌晨') {
-      if (hour === 12) hour = 0
-    }
+  if (range) {
+    hour = Number(range[1])
+    minute = range[2] ? Number(range[2]) : 0
+    rangeEndHour = Number(range[3])
+    rangeEndMinute = range[4] ? Number(range[4]) : 0
+    if (rangeEndHour < hour && rangeEndHour < 12) rangeEndHour += 12
     if (hour > 23) hour = hour % 24
-    if (forcedHour !== null && forcedHour >= 12 && hour < 12) hour += 12
+    if (rangeEndHour > 23) rangeEndHour = rangeEndHour % 24
+    const duration = (rangeEndHour - hour) * 60 + (rangeEndMinute - minute)
+    if (estimateMin === null && duration > 0) estimateMin = duration
   } else {
-    const tm2 = take(/(\d{1,2}):(\d{2})/)
-    if (tm2) {
-      hour = Number(tm2[1])
-      minute = Number(tm2[2])
+    const tm = take(
+      /(凌晨|早上|早晨|上午|中午|下午|傍晚|晚上|夜里)?\s*(\d{1,2}|[一二三四五六七八九十]{1,3})\s*(?:点|时|:)\s*(\d{1,2}|半|[一二三四五六七八九十]{1,3})?\s*分?/
+    )
+    if (tm) {
+      const period = tm[1]
+      hour = cnToNumber(tm[2])
+      const mm = tm[3]
+      minute = mm ? (mm === '半' ? 30 : cnToNumber(mm)) : 0
+      if (period === '下午' || period === '傍晚' || period === '晚上' || period === '夜里') {
+        if (hour < 12) hour += 12
+      } else if (period === '中午') {
+        if (hour < 11) hour += 12
+      } else if (period === '凌晨') {
+        if (hour === 12) hour = 0
+      }
+      if (hour > 23) hour = hour % 24
       if (forcedHour !== null && forcedHour >= 12 && hour < 12) hour += 12
-    } else if (forcedHour !== null) {
-      hour = forcedHour
+    } else {
+      const tm2 = take(/(\d{1,2}):(\d{2})/)
+      if (tm2) {
+        hour = Number(tm2[1])
+        minute = Number(tm2[2])
+        if (forcedHour !== null && forcedHour >= 12 && hour < 12) hour += 12
+      } else if (forcedHour !== null) {
+        hour = forcedHour
+      }
     }
   }
 
@@ -338,6 +386,14 @@ export function parseQuickAdd(input: string, now: Date = new Date()): ParsedQuic
     dueAllDay = 1
   }
 
+  if (plannedOverride) scheduledDate = plannedOverride
+  if (deadlineOverride) {
+    const [dy, dm, dd] = deadlineOverride.split('-').map(Number)
+    const deadline = new Date(dy, (dm ?? 1) - 1, dd ?? 1, 23, 59, 59, 999)
+    dueAt = deadline.toISOString()
+    dueAllDay = 1
+  }
+
   const title = rest
     .replace(/\s+/g, ' ')
     .replace(/^[\s,，、;；:：]+|[\s,，、;；:：]+$/g, '')
@@ -351,6 +407,7 @@ export function parseQuickAdd(input: string, now: Date = new Date()): ParsedQuic
     rrule,
     repeatFrom: rrule ? 'due' : null,
     priority,
+    estimateMin,
     listName,
     tagNames,
     hasExplicitDate

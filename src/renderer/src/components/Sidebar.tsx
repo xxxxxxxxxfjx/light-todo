@@ -4,8 +4,10 @@ import {
   Calendar,
   CalendarDays,
   CheckCircle2,
+  Coffee,
   Inbox,
   Layers,
+  ListFilter,
   MoreHorizontal,
   Moon,
   Pencil,
@@ -32,7 +34,7 @@ const NAV: { key: ViewKey; label: string; icon: typeof Sun }[] = [
 ]
 
 export function Sidebar(): React.JSX.Element {
-  const { sidebar, view, setView, refreshSidebar, openQuickAdd, openSettings, showToast } = useStore()
+  const { sidebar, view, setView, refreshSidebar, openQuickAdd, openSettings, showToast, filters, openFilterEditor, openShutdown } = useStore()
   const [creating, setCreating] = useState<'list' | 'folder' | null>(null)
   const [draft, setDraft] = useState('')
   const [menuListId, setMenuListId] = useState<string | null>(null)
@@ -358,6 +360,29 @@ export function Sidebar(): React.JSX.Element {
         )}
       </div>
 
+      <div className="sb-section filters">
+        <div className="sb-section-head">
+          <span>过滤器</span>
+          <button className="icon-btn" title="新建过滤器" onClick={() => openFilterEditor(null)}>
+            <Plus size={14} />
+          </button>
+        </div>
+        {filters.length === 0 && <div className="sb-empty">把常用条件存成视图</div>}
+        {filters.map((filter) => (
+          <button
+            key={filter.id}
+            className={`nav-item filter-item ${
+              view.type === 'filter' && view.filterId === filter.id ? 'active' : ''
+            }`}
+            onClick={() => setView('filter', { filterId: filter.id, title: filter.name })}
+            title={filter.name}
+          >
+            <ListFilter size={14} className="nav-icon" />
+            <span className="nav-label">{filter.name}</span>
+          </button>
+        ))}
+      </div>
+
       {sidebar.tags.length > 0 && (
         <div className="sb-section tags">
           <div className="sb-section-head">
@@ -378,6 +403,13 @@ export function Sidebar(): React.JSX.Element {
           </div>
         </div>
       )}
+
+      <div className="sb-quick">
+        <button className="nav-item ghost" onClick={openShutdown}>
+          <Coffee size={15} className="nav-icon" />
+          <span className="nav-label">收工</span>
+        </button>
+      </div>
 
       <div className="sb-foot">
         <button className="nav-item ghost" onClick={openSettings}>

@@ -9,7 +9,9 @@ import {
   dialog,
   ipcMain,
   nativeTheme,
-  screen
+  screen,
+  clipboard,
+  ClipboardItem
 } from 'electron'
 import { join } from 'node:path'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -21,6 +23,8 @@ import { registerIpc } from './ipc'
 import { backupNow, registerDataIpc } from './data'
 import { registerPet, schedulePetCreation, stopPet, togglePet, notifyTaskWindows } from './pet'
 import { registerIsland, stopIsland, toggleIsland, notifyIsland } from './island'
+import { ocrImageBuffer } from './ocr'
+import { captureScreenRegion } from './capture'
 import { updateTaskbarBadge } from './badge'
 import type { Task } from '../shared/types'
 
@@ -239,6 +243,79 @@ function quickAdd(): void {
   sendToRenderer('ui:quick-add')
 }
 
+function notifyUser(body: string): void {
+  try {
+    if (Notification.isSupported()) new Notification({ title: '轻单', body }).show()
+  } catch {
+    /* notifications are best effort */
+  }
+}
+
+/** Ctrl+Shift+V：把剪贴板文字直接变成一条待办。 */
+async function captureClipboard(): Promise<void> {
+  const text = (await clipboard.readText()).trim()
+  if (!text) {
+    notifyUser('剪贴板里没有文字')
+    return
+  }
+  showMain()
+  sendToRendererWhenReady('ui:quick-add', text.slice(0, 2000))
+}
+
+/** Ctrl+Shift+O（可自定义）：框选屏幕 → OCR → 取带时间的一行填入快速添加。 */
+async function captureAndOcr(): Promise<void> {
+  try {
+    log('CAPTURE_START')
+    const png = await captureScreenRegion()
+    if (!png) {
+      log('CAPTURE_CANCELLED')
+      return
+    }
+    const size = nativeImage.createFromBuffer(png).getSize()
+    log(`CAPTURE_OK bytes=${png.length} size=${size.width}x${size.height}`)
+    let text = ''
+    let lines: string[] = []
+    try {
+      const result = await ocrImageBuffer(png)
+      text = result.text
+      lines = result.lines
+      log(`OCR_OK lines=${result.lines.length}`)
+    } catch (error) {
+      // OCR failure should not throw away the screenshot: the user can still
+      // type the task by hand in the capture dialog.
+      log(`OCR_FAILED ${String((error as Error)?.message ?? error)}`)
+    }
+    showMain()
+    sendToRendererWhenReady('ui:capture-result', {
+      image: `data:image/png;base64,${png.toString('base64')}`,
+      text,
+      lines
+    })
+  } catch (error) {
+    log(`CAPTURE_FAILED ${String((error as Error)?.stack ?? error)}`)
+    notifyUser(String((error as Error)?.message ?? error))
+  }
+}
+
+const DEFAULT_OCR_SHORTCUT = 'CommandOrControl+Alt+O'
+let activeOcrShortcut = ''
+
+/** Register (or replace) the screenshot OCR shortcut. Returns false when occupied. */
+function registerOcrShortcut(accelerator: string): boolean {
+  if (activeOcrShortcut) {
+    globalShortcut.unregister(activeOcrShortcut)
+    activeOcrShortcut = ''
+  }
+  if (!accelerator) return true
+  try {
+    const ok = globalShortcut.register(accelerator, () => void captureAndOcr())
+    if (ok) activeOcrShortcut = accelerator
+    return ok
+  } catch {
+    return false
+  }
+}
+
 async function runQa(win: BrowserWindow, mode: string): Promise<void> {
   const fillQuick = `(() => {
     const i = document.querySelector('.qa-input');
@@ -347,6 +424,13 @@ function createTray(): void {
   const menu = Menu.buildFromTemplate([
     { label: '打开轻单', click: showMain },
     { label: '新建任务', accelerator: 'CommandOrControl+Shift+Space', click: quickAdd },
+    {
+      label: '收工 / 今日收尾',
+      click: () => {
+        showMain()
+        sendToRendererWhenReady('ui:shutdown')
+      }
+    },
     { label: '显示 / 隐藏任务岛', click: toggleIsland },
     // 桌宠暂停：{ label: '显示 / 隐藏桌面伙伴', click: togglePet },
     { type: 'separator' },
@@ -419,6 +503,7 @@ function showReminderNotification(task: Task): void {
         sendToRendererWhenReady('ui:open-task', task.id)
       })
       toast.show()
+      if (task.urgent) mainWindow?.flashFrame(true)
       return
     } catch (error) {
       console.warn('TOAST_XML_FAILED', task.id, error)
@@ -428,13 +513,17 @@ function showReminderNotification(task: Task): void {
   // macOS / non-Windows / toast fallback: native buttons handled in-process.
   try {
     const n = new Notification({
-      title: '轻单 · 提醒',
+      title: task.urgent ? '轻单 · 紧急提醒' : '轻单 · 提醒',
       body: task.title,
-      silent: false,
+      silent: !task.urgent,
+      ...(task.urgent ? { timeoutType: 'never' as const } : {}),
       actions: [
         { type: 'button', text: '完成' },
         { type: 'button', text: '稍后 10 分钟' }
       ]
+    })
+    n.on('show', () => {
+      if (task.urgent) mainWindow?.flashFrame(true)
     })
     n.on('click', () => {
       showMain()
@@ -503,6 +592,8 @@ function startReminderLoop(): void {
 function registerShortcuts(): void {
   const ok = globalShortcut.register('CommandOrControl+Shift+Space', quickAdd)
   if (!ok) console.warn('GLOBAL_SHORTCUT_FAILED')
+  const clipOk = globalShortcut.register('CommandOrControl+Alt+V', () => void captureClipboard())
+  if (!clipOk) console.warn('CLIPBOARD_SHORTCUT_FAILED')
 }
 
 function handleProtocolUrl(url: string): void {
@@ -591,6 +682,38 @@ if (ownsInstance) app.whenReady().then(() => {
     setSetting('ui_theme', theme)
     return { ...syncWindowTheme(), dark: nativeTheme.shouldUseDarkColors }
   })
+  ipcMain.handle('shortcuts:ocr', () => activeOcrShortcut || DEFAULT_OCR_SHORTCUT)
+  ipcMain.handle('shortcuts:ocrStatus', () => ({
+    accelerator: activeOcrShortcut,
+    registered: activeOcrShortcut ? globalShortcut.isRegistered(activeOcrShortcut) : false
+  }))
+  ipcMain.handle('capture:copyImage', async (_event, dataUrl: string) => {
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png;base64,')) {
+      throw new Error('图片数据无效')
+    }
+    const image = nativeImage.createFromDataURL(dataUrl)
+    if (image.isEmpty()) throw new Error('图片数据无效')
+    const blob = new Blob([new Uint8Array(image.toPNG())], { type: 'image/png' })
+    await clipboard.write([new ClipboardItem({ 'image/png': blob })])
+    return true
+  })
+  ipcMain.handle('capture:copyText', async (_event, text: string) => {
+    if (typeof text !== 'string') throw new Error('文字内容无效')
+    await clipboard.writeText(text)
+    return true
+  })
+  ipcMain.handle('shortcuts:setOcr', (_event, accelerator: string) => {
+    if (typeof accelerator !== 'string' || !accelerator.trim()) throw new Error('快捷键不能为空')
+    const clean = accelerator.trim()
+    if (!/^[A-Za-z0-9+_-]{3,64}$/.test(clean)) throw new Error('快捷键格式无效')
+    const previous = activeOcrShortcut
+    if (!registerOcrShortcut(clean)) {
+      registerOcrShortcut(previous)
+      throw new Error('这个快捷键已被系统或其他程序占用，请换一个')
+    }
+    setSetting('ocr_shortcut', clean)
+    return clean
+  })
   installApplicationMenu()
   if (process.platform === 'darwin') {
     const dockIcon = iconPath()
@@ -613,6 +736,20 @@ if (ownsInstance) app.whenReady().then(() => {
   createTray()
   setTimeout(updateTaskbarBadge, 1200)
   registerShortcuts()
+  const preferredOcr = getSetting('ocr_shortcut') ?? DEFAULT_OCR_SHORTCUT
+  if (!registerOcrShortcut(preferredOcr)) {
+    // 默认键被占用时自动退到更少冲突的组合，并把实际生效值写回设置。
+    for (const fallback of [
+      'CommandOrControl+Alt+Shift+O',
+      'CommandOrControl+Shift+Alt+S',
+      'CommandOrControl+Alt+P'
+    ]) {
+      if (registerOcrShortcut(fallback)) {
+        setSetting('ocr_shortcut', fallback)
+        break
+      }
+    }
+  }
   setupIntegration()
   startReminderLoop()
   // 备份放到窗口显示之后，不阻塞冷启动

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { resolveQuickAddDate } from './lib/quick-add-date'
-import type { CreateTaskInput, SidebarData, Task, UpdateTaskInput, ViewKey } from '@shared/types'
+import type { CaptureResult, CreateTaskInput, ListSection, SavedFilter, SidebarData, Task, UpdateTaskInput, ViewKey } from '@shared/types'
 import { matchFilter, type TaskFilter } from './lib/task-filter'
 export type { TaskFilter } from './lib/task-filter'
 
@@ -8,6 +8,7 @@ export interface ViewState {
   type: ViewKey
   listId?: string
   tagId?: string
+  filterId?: string
   title: string
 }
 
@@ -29,7 +30,8 @@ const INITIAL_LIMITS: Record<ViewKey, number> = {
   calendar: -1,
   review: 0,
   list: 500,
-  tag: 500
+  tag: 500,
+  filter: 500
 }
 const PAGE_SIZE = 500
 
@@ -64,13 +66,33 @@ interface AppStore {
   batchBusy: boolean
   searchOpen: boolean
   settingsOpen: boolean
+  filterEditorOpen: boolean
+  editingFilter: SavedFilter | null
+  replanOpen: boolean
+  shutdownOpen: boolean
+  capture: CaptureResult | null
+  setCapture: (result: CaptureResult) => void
+  closeCapture: () => void
+  filters: SavedFilter[]
+  sections: ListSection[]
+  timer: { taskId: string; startedAt: string } | null
+  openFilterEditor: (filter?: SavedFilter | null) => void
+  closeFilterEditor: () => void
+  loadFilters: () => Promise<void>
+  loadSections: (listId: string) => Promise<void>
+  openReplan: () => void
+  closeReplan: () => void
+  openShutdown: () => void
+  closeShutdown: () => void
+  startTimer: (taskId: string) => void
+  stopTimer: () => Promise<void>
   toast: string
   /** 最近一次可撤销操作的说明；空字符串表示没有可撤销操作。 */
   undoLabel: string
   undo: () => Promise<void>
   moveTask: (id: string, targetId: string, place?: 'before' | 'after') => Promise<void>
   setFilter: (f: TaskFilter) => void
-  setView: (type: ViewKey, opts?: { listId?: string; tagId?: string; title?: string }) => Promise<void>
+  setView: (type: ViewKey, opts?: { listId?: string; tagId?: string; filterId?: string; title?: string }) => Promise<void>
   refresh: () => Promise<void>
   refreshSidebar: () => Promise<void>
   selectTask: (id: string | null) => Promise<void>
@@ -159,6 +181,14 @@ export const useStore = create<AppStore>((set, get) => ({
   batchBusy: false,
   searchOpen: false,
   settingsOpen: false,
+  filterEditorOpen: false,
+  editingFilter: null,
+  replanOpen: false,
+  shutdownOpen: false,
+  capture: null,
+  filters: [],
+  sections: [],
+  timer: null,
   toast: '',
   undoLabel: '',
 
@@ -179,7 +209,8 @@ export const useStore = create<AppStore>((set, get) => ({
         calendar: '日历',
         review: '周复盘',
         list: '清单',
-        tag: '标签'
+        tag: '标签',
+        filter: '过滤器'
       } as Record<ViewKey, string>)[type]
     selectionId++
     requestedLimit = 0
@@ -227,6 +258,7 @@ export const useStore = create<AppStore>((set, get) => ({
         view: view.type,
         listId: view.listId,
         tagId: view.tagId,
+        filterId: view.filterId,
         limit,
         ...(view.type === 'calendar' && calendarRange ? { dateFrom: calendarRange.from, dateTo: calendarRange.to } : {})
       })
@@ -247,7 +279,7 @@ export const useStore = create<AppStore>((set, get) => ({
     requestedLimit = Math.max(requestedLimit, tasks.length + PAGE_SIZE)
     set({ loading: true, error: '' })
     try {
-      const more = await window.api.tasks.list({ view: view.type, listId: view.listId, tagId: view.tagId, limit: PAGE_SIZE, offset: tasks.length })
+      const more = await window.api.tasks.list({ view: view.type, listId: view.listId, tagId: view.tagId, filterId: view.filterId, limit: PAGE_SIZE, offset: tasks.length })
       if (request === refreshId) {
         requestedLimit = Math.max(requestedLimit, tasks.length + more.length)
         set({ tasks: [...tasks, ...more], loading: false, hasMore: more.length === PAGE_SIZE })
@@ -263,6 +295,59 @@ export const useStore = create<AppStore>((set, get) => ({
       set({ sidebar })
     } catch (e) {
       console.error(e)
+    }
+  },
+
+  loadFilters: async () => {
+    try {
+      set({ filters: await window.api.filters.list() })
+    } catch (e) {
+      console.error(e)
+    }
+  },
+
+  loadSections: async (listId) => {
+    try {
+      set({ sections: await window.api.sections.list(listId) })
+    } catch (e) {
+      console.error(e)
+      set({ sections: [] })
+    }
+  },
+
+  openFilterEditor: (filter = null) => set({ filterEditorOpen: true, editingFilter: filter }),
+  closeFilterEditor: () => set({ filterEditorOpen: false, editingFilter: null }),
+  openReplan: () => set({ replanOpen: true }),  closeReplan: () => {
+    try {
+      void window.api.settings.set('replan_last_shown', new Date().toLocaleDateString('sv-SE'))
+    } catch {
+      /* best effort */
+    }
+    set({ replanOpen: false })
+  },
+  openShutdown: () => set({ shutdownOpen: true }),
+  closeShutdown: () => set({ shutdownOpen: false }),
+  setCapture: (result) => set({ capture: result }),
+  closeCapture: () => set({ capture: null }),
+
+  startTimer: (taskId) => {
+    if (get().timer?.taskId === taskId) return
+    set({ timer: { taskId, startedAt: new Date().toISOString() } })
+    get().showToast('开始计时')
+  },
+
+  stopTimer: async () => {
+    const active = get().timer
+    if (!active) return
+    set({ timer: null })
+    try {
+      const task = await window.api.tasks.addTime(active.taskId, active.startedAt, new Date().toISOString())
+      const { selected } = get()
+      if (selected?.id === active.taskId) set({ selected: task })
+      await Promise.all([get().refresh(), get().refreshSidebar()])
+      get().showToast('已记录本次用时')
+    } catch (error) {
+      get().showToast(`记录用时失败：${String(error)}`)
     }
   },
 

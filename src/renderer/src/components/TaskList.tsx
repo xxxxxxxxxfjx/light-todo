@@ -1,15 +1,16 @@
-import { Check, Plus, RotateCcw, Sparkles, Trash2 } from 'lucide-react'
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Check, ChevronDown, ChevronRight, Pencil, Plus, RotateCcw, Sparkles, Trash2, X } from 'lucide-react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { DragEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useStore, type TaskFilter } from '../store'
 import { TaskRow } from './TaskRow'
 import { DayReport } from './DayReport'
-import { differenceInCalendarDays, format } from 'date-fns'
+import { addDays, differenceInCalendarDays, format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { parseLocalDate } from '../lib/format'
 import { isOverdue, matchFilter } from '../lib/task-filter'
 import { globalCaptureLabel } from '../lib/platform'
-import type { Task, ViewKey } from '@shared/types'
+import type { ListSection, Task, ViewKey } from '@shared/types'
 
 const FILTERS: { key: TaskFilter; label: string }[] = [
   { key: 'all', label: '全部' },
@@ -36,10 +37,10 @@ const SECTION_HEIGHT_ESTIMATE = 38
 const TASK_HEIGHT_ESTIMATE = 68
 const REPORT_HEIGHT_ESTIMATE = 38
 
-type TaskSection = { key: string; label: string; tasks: Task[] }
+type TaskSection = { key: string; label: string; tasks: Task[]; count?: number }
 
 type TaskListItem =
-  | { kind: 'section'; key: string; label: string; count: number; overdue: boolean }
+  | { kind: 'section'; key: string; label: string; count: number; overdue: boolean; collapsible?: boolean; collapsed?: boolean }
   | { kind: 'task'; key: string; task: Task }
   | { kind: 'report'; key: string; dateKey: string; tasks: Task[] }
 
@@ -68,10 +69,35 @@ function dayTitle(key: string): string {
   return format(d, 'M月d日 EEEE', { locale: zhCN })
 }
 
-function buildSections(visible: Task[], viewType: ViewKey): TaskSection[] {
+function buildSections(
+  visible: Task[],
+  viewType: ViewKey,
+  listSections: ListSection[] = [],
+  collapsed: Set<string> = new Set()
+): TaskSection[] {
   let sections: TaskSection[] = []
 
-  if (viewType === 'today') {
+  if (viewType === 'list' && listSections.length) {
+    const bySection = new Map<string, Task[]>()
+    for (const task of visible) {
+      const key = task.sectionId ?? 'none'
+      if (!bySection.has(key)) bySection.set(key, [])
+      bySection.get(key)!.push(task)
+    }
+    sections = listSections.map((section) => {
+      const all = bySection.get(section.id) ?? []
+      return {
+        key: section.id,
+        label: section.name,
+        tasks: collapsed.has(section.id) ? [] : all,
+        count: all.length
+      }
+    })
+    const unassigned = bySection.get('none') ?? []
+    if (unassigned.length) {
+      sections.push({ key: 'none', label: '未分区', tasks: unassigned, count: unassigned.length })
+    }
+  } else if (viewType === 'today') {
     const overdue = visible.filter(isOverdue)
     const scheduled = visible.filter((t) => !isOverdue(t) && (t.scheduledDate || t.dueAt))
     const unscheduled = visible.filter((t) => !t.scheduledDate && !t.dueAt)
@@ -107,16 +133,19 @@ function buildSections(visible: Task[], viewType: ViewKey): TaskSection[] {
   return sections
 }
 
-function flattenSections(sections: TaskSection[], withReport: boolean): TaskListItem[] {
+function flattenSections(sections: TaskSection[], withReport: boolean, sectionMode = false): TaskListItem[] {
   const items: TaskListItem[] = []
   for (const section of sections) {
     if (section.label) {
+      const total = section.count ?? section.tasks.length
       items.push({
         kind: 'section',
         key: section.key,
         label: section.label,
-        count: section.tasks.length,
-        overdue: section.key === 'overdue'
+        count: total,
+        overdue: section.key === 'overdue',
+        collapsible: sectionMode,
+        collapsed: sectionMode && total > 0 && section.tasks.length === 0
       })
     }
     for (const task of section.tasks) {
@@ -160,11 +189,159 @@ export function TaskList(): React.JSX.Element {
     batchRestore,
     batchPurge,
     batchBusy,
-    showToast
+    showToast,
+    sections: listSections,
+    loadSections,
+    updateTask,
+    openReplan
   } = useStore()
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const [openReports, setOpenReports] = useState<Set<string>>(() => new Set())
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set())
+  const [addingSection, setAddingSection] = useState(false)
+  const [sectionDraft, setSectionDraft] = useState('')
+  const [workHours, setWorkHours] = useState({ start: '09:00', end: '18:00' })
+  const [overdueCount, setOverdueCount] = useState(0)
+
+  useEffect(() => {
+    if (view.type === 'list' && view.listId) void loadSections(view.listId)
+  }, [view.type, view.listId, loadSections])
+
+  useEffect(() => {
+    setCollapsedSections(new Set(listSections.filter((section) => section.collapsed).map((section) => section.id)))
+  }, [listSections])
+
+  useEffect(() => {
+    const load = (): void => {
+      Promise.all([
+        window.api.settings.get('work_hours_start'),
+        window.api.settings.get('work_hours_end')
+      ])
+        .then(([start, end]) => setWorkHours({ start: start ?? '09:00', end: end ?? '18:00' }))
+        .catch(() => undefined)
+    }
+    load()
+    window.addEventListener('lighttodo:work-hours', load)
+    return () => window.removeEventListener('lighttodo:work-hours', load)
+  }, [])
+
+  useEffect(() => {
+    if (view.type !== 'today') return
+    window.api.replan
+      .list()
+      .then((rows) => setOverdueCount(rows.length))
+      .catch(() => setOverdueCount(0))
+  }, [view.type, tasks])
+
+  const createSection = async (): Promise<void> => {
+    const name = sectionDraft.trim()
+    if (!name || !view.listId) {
+      setAddingSection(false)
+      return
+    }
+    try {
+      await window.api.sections.create(view.listId, name)
+      setSectionDraft('')
+      setAddingSection(false)
+      await loadSections(view.listId)
+      showToast('分区已创建')
+    } catch (error) {
+      showToast(`创建分区失败：${String(error)}`)
+    }
+  }
+
+  const toggleSection = async (section: ListSection): Promise<void> => {
+    const next = new Set(collapsedSections)
+    if (next.has(section.id)) next.delete(section.id)
+    else next.add(section.id)
+    setCollapsedSections(next)
+    try {
+      await window.api.sections.update(section.id, { collapsed: next.has(section.id) })
+    } catch {
+      /* collapsing is only a view preference */
+    }
+  }
+
+  const renameSection = async (section: ListSection): Promise<void> => {
+    const name = window.prompt('分区名称', section.name)?.trim()
+    if (!name || name === section.name) return
+    await window.api.sections.update(section.id, { name })
+    if (view.listId) await loadSections(view.listId)
+  }
+
+  const removeSection = async (section: ListSection): Promise<void> => {
+    if (!window.confirm(`删除分区「${section.name}」？分区里的任务会回到未分区，不会删除。`)) return
+    await window.api.sections.remove(section.id)
+    if (view.listId) await loadSections(view.listId)
+    await refresh()
+  }
+
+  const dropOnSection = async (event: DragEvent<HTMLDivElement>, section: TaskSection): Promise<void> => {
+    event.preventDefault()
+    const id = event.dataTransfer.getData('text/lighttodo-task')
+    if (!id) return
+    await updateTask(id, { sectionId: section.key === 'none' ? null : section.key })
+    showToast(`已移到「${section.label}」`)
+  }
+
+  const toggleSectionByKey = (key: string): void => {
+    const section = listSections.find((item) => item.id === key)
+    if (section) void toggleSection(section)
+  }
+
+  const sectionHead = (item: {
+    key: string
+    label: string
+    count: number
+    overdue?: boolean
+    collapsible?: boolean
+    collapsed?: boolean
+  }): React.JSX.Element => (
+    <div
+      className={`section-head ${item.overdue ? 'overdue' : ''} ${item.collapsible ? 'section-head-list' : ''}`}
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes('text/lighttodo-task')) event.preventDefault()
+      }}
+      onDrop={(event) => void dropOnSection(event, { key: item.key, label: item.label, tasks: [], count: item.count })}
+    >
+      {item.collapsible && (
+        <button
+          className="section-toggle"
+          aria-label={item.collapsed ? '展开分区' : '折叠分区'}
+          onClick={() => toggleSectionByKey(item.key)}
+        >
+          {item.collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+        </button>
+      )}
+      <span className="section-name">{item.label}</span>
+      <span className="section-count">{item.count}</span>
+      {item.collapsible && item.key !== 'none' && (
+        <span className="section-actions">
+          <button
+            className="section-action"
+            title="重命名分区"
+            onClick={() => {
+              const section = listSections.find((row) => row.id === item.key)
+              if (section) void renameSection(section)
+            }}
+          >
+            <Pencil size={11} />
+          </button>
+          <button
+            className="section-action"
+            title="删除分区"
+            onClick={() => {
+              const section = listSections.find((row) => row.id === item.key)
+              if (section) void removeSection(section)
+            }}
+          >
+            <X size={12} />
+          </button>
+        </span>
+      )}
+    </div>
+  )
 
   const toggleReport = useCallback((dateKey: string) => {
     setOpenReports((previous) => {
@@ -176,10 +353,13 @@ export function TaskList(): React.JSX.Element {
   }, [])
 
   const visible = useMemo(() => tasks.filter((t) => matchFilter(t, filter)), [tasks, filter])
-  const sections = useMemo(() => buildSections(visible, view.type), [visible, view.type])
+  const sections = useMemo(
+    () => buildSections(visible, view.type, listSections, collapsedSections),
+    [visible, view.type, listSections, collapsedSections]
+  )
   const isVirtual = view.type !== 'trash' && visible.length > VIRTUAL_THRESHOLD
   const virtualItems = useMemo(
-    () => (isVirtual ? flattenSections(sections, view.type === 'completed') : []),
+    () => (isVirtual ? flattenSections(sections, view.type === 'completed', view.type === 'list') : []),
     [isVirtual, sections, view.type]
   )
 
@@ -225,6 +405,42 @@ export function TaskList(): React.JSX.Element {
     (FILTERS_BY_VIEW[view.type] ?? ['all']).includes(f.key)
   )
 
+  const estimateSum = tasks
+    .filter((task) => task.status === 0)
+    .reduce((sum, task) => sum + (task.estimateMin ?? 0), 0)
+  const actualSum = tasks.reduce((sum, task) => sum + (task.actualMin ?? 0), 0)
+  const toMinutes = (value: string): number => {
+    const [h, m] = value.split(':').map(Number)
+    return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0)
+  }
+  const capacityMinutes = Math.max(0, toMinutes(workHours.end) - toMinutes(workHours.start))
+  const capacityRatio = capacityMinutes > 0 ? estimateSum / capacityMinutes : 0
+  const capacityLabel = (minutes: number): string => {
+    if (!minutes) return '0m'
+    const hours = Math.floor(minutes / 60)
+    const rest = minutes % 60
+    return hours ? `${hours}h${rest ? `${rest}m` : ''}` : `${rest}m`
+  }
+
+  const pushLowPriority = async (): Promise<void> => {
+    const today = format(new Date(), 'yyyy-MM-dd')
+    const tomorrow = format(addDays(new Date(), 1), 'yyyy-MM-dd')
+    const targets = tasks.filter(
+      (task) =>
+        task.status === 0 &&
+        task.scheduledDate === today &&
+        task.priority <= 1
+    )
+    if (!targets.length) {
+      showToast('今天没有可推走的低优先级任务')
+      return
+    }
+    for (const task of targets) {
+      await updateTask(task.id, { scheduledDate: tomorrow })
+    }
+    showToast(`已把 ${targets.length} 项低优先级任务推到明天`)
+  }
+
   const errorBanner = error ? (
     <div className="list-error" role="alert">
       {error}{' '}
@@ -246,8 +462,57 @@ export function TaskList(): React.JSX.Element {
                 ? `${visible.length}${hasMore ? '+' : ''} 条已删除`
                 : `${visible.length}${hasMore ? '+' : ''} 项`}
           </span>
+          {view.type === 'today' && estimateSum > 0 && capacityMinutes > 0 && (
+            <span className="capacity-pill-wrap">
+              <button
+                type="button"
+                className={`capacity-pill ${capacityRatio > 1 ? 'over' : capacityRatio > 0.8 ? 'warn' : ''}`}
+                aria-label={`今日已排 ${capacityLabel(estimateSum)}，可用 ${capacityLabel(capacityMinutes)}`}
+              >
+                <span className="capacity-pill-track">
+                  <span style={{ width: `${Math.min(100, Math.round(capacityRatio * 100))}%` }} />
+                </span>
+                <span className="capacity-pill-text">
+                  {capacityLabel(estimateSum)}/{capacityLabel(capacityMinutes)}
+                </span>
+              </button>
+              <span className="capacity-pop" role="tooltip">
+                <span className="capacity-pop-head">今天的容量</span>
+                <span className="capacity-pop-row">
+                  <span>已排</span>
+                  <strong>{capacityLabel(estimateSum)}</strong>
+                </span>
+                <span className="capacity-pop-row">
+                  <span>可用</span>
+                  <strong>{capacityLabel(capacityMinutes)}</strong>
+                </span>
+                <span className="capacity-pop-row">
+                  <span>实际</span>
+                  <strong>{capacityLabel(actualSum)}</strong>
+                </span>
+                <span className="capacity-pop-track">
+                  <i style={{ width: `${Math.min(100, Math.round(capacityRatio * 100))}%` }} />
+                </span>
+                {capacityRatio > 0.8 && (
+                  <button className="capacity-pop-action" onClick={() => void pushLowPriority()}>
+                    低优先级推到明天
+                  </button>
+                )}
+              </span>
+            </span>
+          )}
         </div>
         <div className="head-actions">
+          {view.type === 'today' && overdueCount > 0 && (
+            <button className="ghost-btn overdue-btn" onClick={openReplan}>
+              清理逾期 {overdueCount}
+            </button>
+          )}
+          {view.type === 'list' && (
+            <button className="ghost-btn" onClick={() => setAddingSection(true)}>
+              新建分区
+            </button>
+          )}
           <button
             className={`ghost-btn ${selectMode ? 'active' : ''}`}
             onClick={toggleSelectMode}
@@ -262,6 +527,27 @@ export function TaskList(): React.JSX.Element {
           )}
         </div>
       </header>
+
+      {addingSection && view.type === 'list' && (
+        <div className="section-create">
+          <input
+            autoFocus
+            className="inline-input"
+            placeholder="分区名称，如：本周 / 下周 / 以后"
+            value={sectionDraft}
+            onChange={(event) => setSectionDraft(event.target.value)}
+            onBlur={() => void createSection()}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing || event.keyCode === 229) return
+              if (event.key === 'Enter') void createSection()
+              if (event.key === 'Escape') {
+                setAddingSection(false)
+                setSectionDraft('')
+              }
+            }}
+          />
+        </div>
+      )}
 
       {selectMode && (
         <div className="bulk-bar" aria-busy={batchBusy}>
@@ -460,10 +746,7 @@ export function TaskList(): React.JSX.Element {
                   style={{ transform: `translateY(${virtualRow.start}px)` }}
                 >
                   {item.kind === 'section' ? (
-                    <div className={`section-head ${item.overdue ? 'overdue' : ''}`}>
-                      <span>{item.label}</span>
-                      <span className="section-count">{item.count}</span>
-                    </div>
+                    sectionHead(item)
                   ) : item.kind === 'report' ? (
                     <DayReport
                       dateKey={item.dateKey}
@@ -482,12 +765,14 @@ export function TaskList(): React.JSX.Element {
         ) : (
           sections.map((s) => (
             <div key={s.key} className="task-section">
-              {s.label && (
-                <div className={`section-head ${s.key === 'overdue' ? 'overdue' : ''}`}>
-                  <span>{s.label}</span>
-                  <span className="section-count">{s.tasks.length}</span>
-                </div>
-              )}
+              {s.label && sectionHead({
+                key: s.key,
+                label: s.label,
+                count: s.count ?? s.tasks.length,
+                overdue: s.key === 'overdue',
+                collapsible: view.type === 'list',
+                collapsed: (s.count ?? 0) > 0 && s.tasks.length === 0
+              })}
               <div className="rows">
                 {s.tasks.map((t) => (
                   <TaskRow key={t.id} task={t} />
@@ -530,6 +815,8 @@ function emptyTitle(type: string): string {
       return '还没有完成记录'
     case 'trash':
       return '回收站是空的'
+    case 'filter':
+      return '没有符合过滤器的任务'
     default:
       return '这里还没有任务'
   }

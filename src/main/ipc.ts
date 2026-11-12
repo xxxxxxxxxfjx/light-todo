@@ -41,6 +41,40 @@ export function registerIpc(): void {
 
   ipcMain.handle('sidebar:get', () => db.getSidebar())
   ipcMain.handle('review:get', () => db.getWeeklyReview())
+  ipcMain.handle('review:day', (_e, date: string) => db.getDayReview(date))
+  ipcMain.handle('review:saveDay', (_e, date: string, rating: number | null, note: string) =>
+    db.saveDayReview(date, rating, note)
+  )
+  ipcMain.handle('review:dates', (_e, from: string, to: string) => db.getReviewedDates(from, to))
+  ipcMain.handle('review:shouldPrompt', () => db.shouldPromptShutdown())
+
+  ipcMain.handle('replan:list', () => db.listOverdueTasks())
+  ipcMain.handle('replan:act', (e, id: string, action: db.ReplanAction, date?: string | null) =>
+    mutate(e.sender.id, () => db.replanTask(id, action, date))
+  )
+
+  ipcMain.handle('sections:list', (_e, listId: string) => db.getSections(listId))
+  ipcMain.handle('sections:create', (_e, listId: string, name: string) => db.createSection(listId, name))
+  ipcMain.handle('sections:update', (_e, id: string, patch: Parameters<typeof db.updateSection>[1]) =>
+    db.updateSection(id, patch)
+  )
+  ipcMain.handle('sections:delete', (e, id: string) => mutate(e.sender.id, () => db.deleteSection(id)))
+
+  ipcMain.handle('filters:list', () => db.getSavedFilters())
+  ipcMain.handle('filters:create', (_e, input: Parameters<typeof db.createSavedFilter>[0]) =>
+    db.createSavedFilter(input)
+  )
+  ipcMain.handle('filters:update', (_e, id: string, patch: Parameters<typeof db.updateSavedFilter>[1]) =>
+    db.updateSavedFilter(id, patch)
+  )
+  ipcMain.handle('filters:delete', (_e, id: string) => db.deleteSavedFilter(id))
+  ipcMain.handle('filters:preview', (_e, query: Parameters<typeof db.countFilter>[0]) =>
+    db.countFilter(query)
+  )
+
+  ipcMain.handle('tasks:addTime', (e, id: string, startedAt: string, endedAt: string) =>
+    mutate(e.sender.id, () => db.addTimeEntry(id, startedAt, endedAt))
+  )
 
   ipcMain.handle('tasks:list', (_e, opts: Parameters<typeof db.listTasks>[0]) => db.listTasks(opts))
   ipcMain.handle('tasks:get', (_e, id: string) => db.getTask(id))

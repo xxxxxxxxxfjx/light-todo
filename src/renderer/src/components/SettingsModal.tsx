@@ -91,6 +91,13 @@ export function SettingsModal(): React.JSX.Element {
   const [calendarUrl, setCalendarUrl] = useState('')
   const [calendarSub, setCalendarSub] = useState<CalendarSubscriptionView | null>(null)
   const [calendarBusy, setCalendarBusy] = useState(false)
+  const [workStart, setWorkStart] = useState('09:00')
+  const [workEnd, setWorkEnd] = useState('18:00')
+  const [shutdownTime, setShutdownTime] = useState('17:30')
+  const [shutdownEnabled, setShutdownEnabled] = useState(true)
+  const [replanEnabled, setReplanEnabled] = useState(true)
+  const [ocrShortcut, setOcrShortcut] = useState('CommandOrControl+Alt+O')
+  const [recordingShortcut, setRecordingShortcut] = useState(false)
 
   const changeIsland = async (patch: Partial<IslandSettings>): Promise<void> => {
     setIslandSaving(true)
@@ -154,6 +161,12 @@ export function SettingsModal(): React.JSX.Element {
     window.api.app.info().then(setInfo)
     window.api.data.getLoginItem().then(setLogin)
     window.api.settings.get('reminders_enabled').then((v) => setReminders(v !== '0'))
+    window.api.settings.get('work_hours_start').then((v) => v && setWorkStart(v))
+    window.api.settings.get('work_hours_end').then((v) => v && setWorkEnd(v))
+    window.api.settings.get('shutdown_time').then((v) => v && setShutdownTime(v))
+    window.api.settings.get('shutdown_enabled').then((v) => setShutdownEnabled(v !== '0'))
+    window.api.settings.get('replan_enabled').then((v) => setReplanEnabled(v !== '0'))
+    window.api.shortcuts.ocr().then(setOcrShortcut).catch(() => undefined)
     loadBackups()
     window.api.pet.settings().then(value => { setPet(value); setPetReady(true) }).catch(() => setPetReady(false))
     window.api.island.settings().then(setIsland).catch(() => {})
@@ -250,7 +263,7 @@ export function SettingsModal(): React.JSX.Element {
         </div>
 
         <nav className="settings-tabs" aria-label="设置分类">
-          {[['island', '任务岛'], ['appearance', '外观与启动'], ['tags', '标签管理'], ['data', '数据与备份'], ['about', '关于']].map(([key, name]) => <button key={key} aria-current={section === key ? 'page' : undefined} className={section === key ? 'active' : ''} onClick={() => setSection(key)}>{name}</button>)}
+          {[['island', '任务岛'], ['appearance', '外观与启动'], ['rhythm', '节奏'], ['tags', '标签管理'], ['data', '数据与备份'], ['about', '关于']].map(([key, name]) => <button key={key} aria-current={section === key ? 'page' : undefined} className={section === key ? 'active' : ''} onClick={() => setSection(key)}>{name}</button>)}
         </nav>
         <div className="settings-body">
           <section className="set-section island-settings" hidden={section !== 'island'}>
@@ -332,6 +345,114 @@ export function SettingsModal(): React.JSX.Element {
                 ))}
               </select>
             </div>
+          </section>
+
+          <section className="set-section" hidden={section !== 'rhythm'}>
+            <div className="set-title">工作节奏</div>
+            <div className="set-row">
+              <span className="set-label">可用时间</span>
+              <div className="time-range">
+                <input
+                  type="time"
+                  value={workStart}
+                  onChange={(event) => {
+                    setWorkStart(event.target.value)
+                    void window.api.settings.set('work_hours_start', event.target.value)
+                    window.dispatchEvent(new Event('lighttodo:work-hours'))
+                  }}
+                />
+                <span>—</span>
+                <input
+                  type="time"
+                  value={workEnd}
+                  onChange={(event) => {
+                    setWorkEnd(event.target.value)
+                    void window.api.settings.set('work_hours_end', event.target.value)
+                    window.dispatchEvent(new Event('lighttodo:work-hours'))
+                  }}
+                />
+              </div>
+              <span className="set-hint">「今天」容量条按这个区间计算</span>
+            </div>
+            <label className="set-row clickable">
+              <span className="set-label">收工提醒</span>
+              <input
+                type="checkbox"
+                role="switch"
+                checked={shutdownEnabled}
+                onChange={(event) => {
+                  setShutdownEnabled(event.target.checked)
+                  void window.api.settings.set('shutdown_enabled', event.target.checked ? '1' : '0')
+                }}
+              />
+              <span className="set-hint">到点提醒你给今天收个尾</span>
+            </label>
+            <div className="set-row">
+              <span className="set-label">收工时间</span>
+              <input
+                type="time"
+                value={shutdownTime}
+                disabled={!shutdownEnabled}
+                onChange={(event) => {
+                  setShutdownTime(event.target.value)
+                  void window.api.settings.set('shutdown_time', event.target.value)
+                }}
+              />
+            </div>
+            <div className="set-row">
+              <span className="set-label">截图识别</span>
+              <button
+                className={`shortcut-recorder ${recordingShortcut ? 'recording' : ''}`}
+                onClick={() => setRecordingShortcut(true)}
+                onBlur={() => setRecordingShortcut(false)}
+                onKeyDown={(event) => {
+                  if (!recordingShortcut) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  if (event.key === 'Escape') {
+                    setRecordingShortcut(false)
+                    return
+                  }
+                  if (['Control', 'Alt', 'Shift', 'Meta'].includes(event.key)) return
+                  const parts: string[] = []
+                  if (event.ctrlKey || event.metaKey) parts.push('CommandOrControl')
+                  if (event.altKey) parts.push('Alt')
+                  if (event.shiftKey) parts.push('Shift')
+                  let key = event.key
+                  if (key === ' ') key = 'Space'
+                  else if (key.startsWith('Arrow')) key = key.replace('Arrow', '')
+                  else if (key.length === 1) key = key.toUpperCase()
+                  parts.push(key)
+                  const accelerator = parts.join('+')
+                  setRecordingShortcut(false)
+                  window.api.shortcuts
+                    .setOcr(accelerator)
+                    .then((value) => {
+                      setOcrShortcut(value)
+                      showToast('截图快捷键已更新')
+                    })
+                    .catch((error) => showToast(readableError(error)))
+                }}
+              >
+                {recordingShortcut
+                  ? '按下组合键…'
+                  : ocrShortcut.replace(/CommandOrControl/g, 'Ctrl').replace(/\+/g, ' + ')}
+              </button>
+              <span className="set-hint">框选屏幕 → OCR → 自动解析日期与时间段；默认 Ctrl + Alt + O，避开微信 Alt+A 与系统 Win+Shift+S</span>
+            </div>
+            <label className="set-row clickable">
+              <span className="set-label">启动时清理逾期</span>
+              <input
+                type="checkbox"
+                role="switch"
+                checked={replanEnabled}
+                onChange={(event) => {
+                  setReplanEnabled(event.target.checked)
+                  void window.api.settings.set('replan_enabled', event.target.checked ? '1' : '0')
+                }}
+              />
+              <span className="set-hint">每天第一次打开时，逐条决定逾期任务去向</span>
+            </label>
           </section>
 
           <section className="set-section" hidden={section !== 'tags'}>

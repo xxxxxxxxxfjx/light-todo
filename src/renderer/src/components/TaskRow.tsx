@@ -245,6 +245,14 @@ export const TaskRow = memo(function TaskRow({ task }: { task: Task }): React.JS
               {due.text}
             </span>
           )}
+          {task.estimateMin ? (
+            <span className="meta-chip" title="预计用时">
+              <Clock size={11} />
+              {task.estimateMin >= 60
+                ? `${Math.floor(task.estimateMin / 60)}h${task.estimateMin % 60 ? `${task.estimateMin % 60}m` : ''}`
+                : `${task.estimateMin}m`}
+            </span>
+          ) : null}
           {task.rrule && (
             <span className="meta-chip">
               <Repeat size={11} />

@@ -30,18 +30,19 @@ export function escapeXml(value: string): string {
  * Protocol activation is used instead of in-process handlers so the buttons work
  * even when the toast is clicked while the app is not running.
  */
-export function buildTaskToastXml(task: Pick<Task, 'id' | 'title'>): string {
+export function buildTaskToastXml(task: Pick<Task, 'id' | 'title' | 'urgent'>): string {
   const id = encodeURIComponent(task.id)
   const openUrl = `lighttodo://open?id=${id}`
   const completeUrl = `lighttodo://complete?id=${id}`
   const snoozeUrl = `lighttodo://snooze?id=${id}&minutes=${DEFAULT_SNOOZE_MINUTES}`
   return [
     '<?xml version="1.0" encoding="utf-8"?>',
-    `<toast activationType="protocol" launch="${escapeXml(openUrl)}">`,
+    `<toast activationType="protocol" launch="${escapeXml(openUrl)}"${task.urgent ? ' scenario="urgent"' : ''}>`,
     '  <visual>',
     '    <binding template="ToastGeneric">',
-    '      <text>轻单 · 提醒</text>',
+    `      <text>${task.urgent ? '轻单 · 紧急提醒' : '轻单 · 提醒'}</text>`,
     `      <text>${escapeXml(task.title)}</text>`,
+    ...(task.urgent ? ['      <text>这条任务标记为紧急，完成后才会停止催办</text>'] : []),
     '    </binding>',
     '  </visual>',
     '  <actions>',

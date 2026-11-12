@@ -10,6 +10,10 @@ import { QuickAdd } from './components/QuickAdd'
 import { SearchPalette } from './components/SearchPalette'
 import { SettingsModal } from './components/SettingsModal'
 import { CommandPalette } from './components/CommandPalette'
+import { ReplanPanel } from './components/ReplanPanel'
+import { ShutdownModal } from './components/ShutdownModal'
+import { FilterEditor } from './components/FilterEditor'
+import { CaptureModal } from './components/CaptureModal'
 import { useStore } from './store'
 
 export default function App(): React.JSX.Element {
@@ -37,7 +41,18 @@ export default function App(): React.JSX.Element {
     updateTask,
     showToast,
     sidebarOpen,
-    closeSidebar
+    closeSidebar,
+    loadFilters,
+    openReplan,
+    replanOpen,
+    shutdownOpen,
+    openShutdown,
+    closeShutdown,
+    filterEditorOpen,
+    closeFilterEditor,
+    capture,
+    setCapture,
+    closeCapture
   } = useStore()
   const [commandOpen, setCommandOpen] = useState(false)
 
@@ -60,6 +75,7 @@ export default function App(): React.JSX.Element {
     }
     refreshSidebar()
     refresh()
+    loadFilters()
     const dv = localStorage.getItem('lighttodo.defaultView')
     if (dv === 'inbox' || dv === 'upcoming' || dv === 'all' || dv === 'someday') {
       setView(dv, {
@@ -75,6 +91,7 @@ export default function App(): React.JSX.Element {
     }
     // 托盘 / 全局快捷键 / lighttodo://add 都是“捕获”：默认进收件箱。
     const offQuick = window.api.onQuickAdd((text) => openQuickAdd(text ?? '', undefined, true))
+    const offCapture = window.api.onCaptureResult((result) => setCapture(result))
     const offOpen = window.api.onOpenTask((id) => selectTaskById(id))
     const offSettings = window.api.onSettings(() => useStore.getState().openSettings())
     const offTasks = window.api.onTasksChanged(() => {
@@ -89,12 +106,51 @@ export default function App(): React.JSX.Element {
     window.addEventListener('unhandledrejection', reportFailure)
     return () => {
       offQuick()
+      offCapture()
       offOpen()
       offSettings()
       offTasks()
       window.removeEventListener('unhandledrejection', reportFailure)
     }
   }, [])
+
+  useEffect(() => {
+    const today = format(new Date(), 'yyyy-MM-dd')
+    let alive = true
+    void (async () => {
+      try {
+        const [enabled, shown, pending] = await Promise.all([
+          window.api.settings.get('replan_enabled'),
+          window.api.settings.get('replan_last_shown'),
+          window.api.replan.list()
+        ])
+        if (alive && enabled !== '0' && shown !== today && pending.length > 0) openReplan()
+      } catch {
+        /* replan is best effort */
+      }
+    })()
+
+    let promptedFor = ''
+    const checkShutdown = async (): Promise<void> => {
+      try {
+        const should = await window.api.review.shouldPrompt()
+        if (!alive || !should || promptedFor === today) return
+        promptedFor = today
+        openShutdown()
+      } catch {
+        /* shutdown prompt is best effort */
+      }
+    }
+    const timer = setTimeout(() => void checkShutdown(), 5000)
+    const interval = setInterval(() => void checkShutdown(), 60_000)
+    const offShutdown = window.api.onShutdown(() => openShutdown())
+    return () => {
+      alive = false
+      clearTimeout(timer)
+      clearInterval(interval)
+      offShutdown()
+    }
+  }, [openReplan, openShutdown])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
@@ -118,6 +174,16 @@ export default function App(): React.JSX.Element {
         if (e.key === 'Escape') {
           e.preventDefault()
           closeSettings()
+        }
+        return
+      }
+      if (filterEditorOpen || shutdownOpen || replanOpen || capture) {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          if (filterEditorOpen) closeFilterEditor()
+          if (shutdownOpen) closeShutdown()
+          if (replanOpen) useStore.getState().closeReplan()
+          if (capture) closeCapture()
         }
         return
       }
@@ -177,6 +243,37 @@ export default function App(): React.JSX.Element {
         }
       }
 
+      // 单键改属性：Alt+T 今天 / Alt+M 明天 / Alt+S 也许 / Alt+P 循环优先级 / Alt+1..4 直接设优先级
+      if (e.altKey && selected && !mod && !typing && !quickAddOpen && !searchOpen) {
+        const key = e.key.toLowerCase()
+        if (['t', 'm', 's', 'p', '1', '2', '3', '4'].includes(key)) {
+          e.preventDefault()
+          if (selected.status === 1 && key !== 'p' && !/^[1-4]$/.test(key)) {
+            showToast('已完成的任务请先恢复再安排')
+            return
+          }
+          if (key === 't') {
+            void updateTask(selected.id, { scheduledDate: format(new Date(), 'yyyy-MM-dd'), someday: false })
+            showToast('已安排到今天')
+          } else if (key === 'm') {
+            void updateTask(selected.id, {
+              scheduledDate: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
+              someday: false
+            })
+            showToast('已安排到明天')
+          } else if (key === 's') {
+            void updateTask(selected.id, { someday: true, scheduledDate: null, dueAt: null })
+            showToast('已移到也许')
+          } else if (key === 'p') {
+            void updateTask(selected.id, { priority: (selected.priority + 1) % 4 })
+          } else {
+            void updateTask(selected.id, { priority: 4 - Number(key) })
+            showToast(`优先级已设为${['无', '低', '中', '高'][4 - Number(key)]}`)
+          }
+          return
+        }
+      }
+
       if (mod && /^[1-6]$/.test(e.key)) {
         e.preventDefault()
         const map: { key: Parameters<typeof setView>[0]; title: string }[] = [
@@ -229,7 +326,7 @@ export default function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [selected, quickAddOpen, searchOpen, settingsOpen, view, commandOpen])
+  }, [selected, quickAddOpen, searchOpen, settingsOpen, view, commandOpen, filterEditorOpen, shutdownOpen, replanOpen, capture])
 
   useEffect(() => {
     if (!selected) return
@@ -262,6 +359,10 @@ export default function App(): React.JSX.Element {
       {quickAddOpen && <QuickAdd />}
       {searchOpen && <SearchPalette />}
       {settingsOpen && <SettingsModal />}
+      {replanOpen && <ReplanPanel />}
+      {shutdownOpen && <ShutdownModal />}
+      {filterEditorOpen && <FilterEditor />}
+      <CaptureModal />
       <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} />
       {toast && (
         <div className="toast">

@@ -117,6 +117,7 @@ export function QuickAdd(): React.JSX.Element {
         parsed.priority ||
         parsed.listName ||
         parsed.tagNames.length ||
+        parsed.estimateMin ||
         parsed.rrule
       )
     if (!title || savingRef.current) return
@@ -179,6 +180,7 @@ export function QuickAdd(): React.JSX.Element {
       rrule: parsed.rrule,
       repeatFrom: parsed.repeatFrom,
       priority: parsed.priority,
+      estimateMin: parsed.estimateMin,
       tagNames
     })
     setFilter('all')
@@ -247,7 +249,7 @@ export function QuickAdd(): React.JSX.Element {
           </div>
         )}
 
-        {(parsed.scheduledDate || parsed.dueAt || parsed.priority || parsed.listName || parsed.tagNames.length > 0 || parsed.rrule || quickAddDate || previewSomeday) && (
+        {(parsed.scheduledDate || parsed.dueAt || parsed.priority || parsed.listName || parsed.tagNames.length > 0 || parsed.rrule || parsed.estimateMin || quickAddDate || previewSomeday) && (
           <div className="qa-chips">
             {previewSomeday && (
               <Chip icon={Moon}>也许</Chip>
@@ -260,6 +262,7 @@ export function QuickAdd(): React.JSX.Element {
             {parsed.priority > 0 && (
               <Chip icon={Flag}>{['', '低', '中', '高'][parsed.priority]}优先级</Chip>
             )}
+            {parsed.estimateMin && <Chip icon={Clock}>{parsed.estimateMin >= 60 ? `${Math.floor(parsed.estimateMin / 60)}h${parsed.estimateMin % 60 ? `${parsed.estimateMin % 60}m` : ''}` : `${parsed.estimateMin}m`}</Chip>}
             {parsed.listName && <Chip icon={Hash}>{parsed.listName}</Chip>}
             {parsed.tagNames.map((t) => (
               <Chip key={t} icon={Tag}>
@@ -277,7 +280,7 @@ export function QuickAdd(): React.JSX.Element {
             <kbd>{mod}</kbd> + <kbd>Enter</kbd> 继续添加
           </span>
           <button className="qa-template-save" title="保存当前输入为模板" disabled={!text.trim()} onClick={() => void saveTemplate()}>存模板</button>
-          <span className="qa-syntax">支持：明天 / 每周一 / !高 / #清单 / @标签</span>
+          <span className="qa-syntax">支持：明天 / !高 / #清单 / @标签 / =30m / &gt;今天 / &lt;周五</span>
           <button className="qa-submit" disabled={saving} onClick={() => submit(false)}>
             {saving ? '保存中…' : '添加'}
           </button>

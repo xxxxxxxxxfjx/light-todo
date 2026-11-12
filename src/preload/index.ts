@@ -2,8 +2,14 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { PetSettings } from '../shared/pet'
 import type { IslandSettings } from '../shared/island'
 import type {
+  CaptureResult,
   CreateTaskInput,
+  DayReview,
+  FilterQuery,
   List,
+  ListSection,
+  SavedFilter,
+  Task,
   UpdateTaskInput,
   ViewKey,
   WeeklyReviewData
@@ -77,7 +83,34 @@ const api = {
     get: () => ipcRenderer.invoke('sidebar:get')
   },
   review: {
-    get: (): Promise<WeeklyReviewData> => ipcRenderer.invoke('review:get')
+    get: (): Promise<WeeklyReviewData> => ipcRenderer.invoke('review:get'),
+    day: (date: string): Promise<DayReview | null> => ipcRenderer.invoke('review:day', date),
+    saveDay: (date: string, rating: number | null, note: string): Promise<DayReview> =>
+      ipcRenderer.invoke('review:saveDay', date, rating, note),
+    dates: (from: string, to: string): Promise<string[]> => ipcRenderer.invoke('review:dates', from, to),
+    shouldPrompt: (): Promise<boolean> => ipcRenderer.invoke('review:shouldPrompt')
+  },
+  replan: {
+    list: (): Promise<Task[]> => ipcRenderer.invoke('replan:list'),
+    act: (id: string, action: 'complete' | 'today' | 'tomorrow' | 'date' | 'someday', date?: string | null): Promise<Task | null> =>
+      ipcRenderer.invoke('replan:act', id, action, date)
+  },
+  sections: {
+    list: (listId: string): Promise<ListSection[]> => ipcRenderer.invoke('sections:list', listId),
+    create: (listId: string, name: string): Promise<ListSection> =>
+      ipcRenderer.invoke('sections:create', listId, name),
+    update: (id: string, patch: { name?: string; collapsed?: boolean; sortOrder?: number }): Promise<void> =>
+      ipcRenderer.invoke('sections:update', id, patch),
+    remove: (id: string): Promise<void> => ipcRenderer.invoke('sections:delete', id)
+  },
+  filters: {
+    list: (): Promise<SavedFilter[]> => ipcRenderer.invoke('filters:list'),
+    create: (input: { name: string; query: FilterQuery; color?: string | null }): Promise<SavedFilter> =>
+      ipcRenderer.invoke('filters:create', input),
+    update: (id: string, patch: { name?: string; query?: FilterQuery; color?: string | null; pinned?: number }): Promise<SavedFilter> =>
+      ipcRenderer.invoke('filters:update', id, patch),
+    remove: (id: string): Promise<void> => ipcRenderer.invoke('filters:delete', id),
+    preview: (query: FilterQuery): Promise<number> => ipcRenderer.invoke('filters:preview', query)
   },
   calendar: {
     syncIcs: (url: string): Promise<CalendarSyncResultView> =>
@@ -89,7 +122,7 @@ const api = {
     clearIcs: (): Promise<void> => ipcRenderer.invoke('calendar:clearIcs')
   },
   tasks: {
-    list: (opts: { view: ViewKey; listId?: string; tagId?: string; limit?: number; offset?: number; dateFrom?: string; dateTo?: string }) =>
+    list: (opts: { view: ViewKey; listId?: string; tagId?: string; filterId?: string; limit?: number; offset?: number; dateFrom?: string; dateTo?: string }) =>
       ipcRenderer.invoke('tasks:list', opts),
     get: (id: string) => ipcRenderer.invoke('tasks:get', id),
     create: (input: CreateTaskInput) => ipcRenderer.invoke('tasks:create', input),
@@ -99,7 +132,9 @@ const api = {
     restore: (id: string) => ipcRenderer.invoke('tasks:restore', id),
     purge: (id: string) => ipcRenderer.invoke('tasks:purge', id),
     reorder: (items: { id: string; sortOrder: number }[]) =>
-      ipcRenderer.invoke('tasks:reorder', items)
+      ipcRenderer.invoke('tasks:reorder', items),
+    addTime: (id: string, startedAt: string, endedAt: string): Promise<Task> =>
+      ipcRenderer.invoke('tasks:addTime', id, startedAt, endedAt)
   },
   lists: {
     create: (input: { name: string; color?: string; icon?: string; folderId?: string | null }) =>
@@ -121,6 +156,12 @@ const api = {
   },
   search: {
     query: (q: string) => ipcRenderer.invoke('search:query', q)
+  },
+  shortcuts: {
+    ocr: (): Promise<string> => ipcRenderer.invoke('shortcuts:ocr'),
+    setOcr: (accelerator: string): Promise<string> => ipcRenderer.invoke('shortcuts:setOcr', accelerator),
+    status: (): Promise<{ accelerator: string; registered: boolean }> =>
+      ipcRenderer.invoke('shortcuts:ocrStatus')
   },
   settings: {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),
@@ -153,6 +194,24 @@ const api = {
     return (): void => {
       ipcRenderer.removeListener('ui:open-task', listener)
     }
+  },
+  onShutdown: (cb: () => void) => {
+    const listener = (): void => cb()
+    ipcRenderer.on('ui:shutdown', listener)
+    return (): void => {
+      ipcRenderer.removeListener('ui:shutdown', listener)
+    }
+  },
+  onCaptureResult: (cb: (result: CaptureResult) => void) => {
+    const listener = (_e: unknown, result: CaptureResult): void => cb(result)
+    ipcRenderer.on('ui:capture-result', listener)
+    return (): void => {
+      ipcRenderer.removeListener('ui:capture-result', listener)
+    }
+  },
+  capture: {
+    copyImage: (dataUrl: string): Promise<boolean> => ipcRenderer.invoke('capture:copyImage', dataUrl),
+    copyText: (text: string): Promise<boolean> => ipcRenderer.invoke('capture:copyText', text)
   }
 }
 

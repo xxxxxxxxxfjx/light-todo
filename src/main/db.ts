@@ -15,8 +15,13 @@ import type {
   Task,
   UpdateTaskInput,
   ViewKey,
-  WeeklyReviewData
+  WeeklyReviewData,
+  ListSection,
+  SavedFilter,
+  FilterQuery,
+  DayReview
 } from '../shared/types'
+import { buildFilterSql, emptyFilterQuery, queryHasField } from '../shared/filter-query.ts'
 import { DEFAULT_PET_SETTINGS, LEGACY_PET_SETTINGS } from '../shared/pet.ts'
 
 let db: DatabaseSync | null = null
@@ -59,6 +64,13 @@ CREATE TABLE IF NOT EXISTS tasks (
   reminder_at    TEXT,
   reminder_offset INTEGER,
   notified_at    TEXT,
+  estimate_min   INTEGER,
+  actual_min     INTEGER,
+  section_id     TEXT,
+  escalate_interval INTEGER,
+  escalate_until TEXT,
+  next_escalate_at TEXT,
+  urgent         INTEGER NOT NULL DEFAULT 0,
   completed_at   TEXT,
   deleted_at     TEXT,
   deleted_batch  TEXT,
@@ -158,6 +170,57 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
+-- 清单分区（Things 式 Heading）。任务通过 tasks.section_id 归组。
+CREATE TABLE IF NOT EXISTS list_sections (
+  id          TEXT PRIMARY KEY,
+  list_id     TEXT NOT NULL REFERENCES lists(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  sort_order  REAL NOT NULL DEFAULT 0,
+  collapsed   INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sections_list ON list_sections(list_id, sort_order);
+
+-- 保存的智能过滤器。query_json 存结构化 AST，不存查询文本，避免解析歧义。
+CREATE TABLE IF NOT EXISTS saved_filters (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  query_json  TEXT NOT NULL,
+  color       TEXT,
+  pinned      INTEGER NOT NULL DEFAULT 0,
+  sort_order  REAL NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL
+);
+
+-- 每日收尾（关机仪式）。
+CREATE TABLE IF NOT EXISTS day_reviews (
+  date         TEXT PRIMARY KEY,
+  rating       INTEGER,
+  note         TEXT NOT NULL DEFAULT '',
+  reviewed_at  TEXT NOT NULL
+);
+
+-- 过期任务处理记录，用于周复盘统计「顺延次数」。
+CREATE TABLE IF NOT EXISTS replan_log (
+  id         TEXT PRIMARY KEY,
+  date       TEXT NOT NULL,
+  task_id    TEXT NOT NULL,
+  action     TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_replan_date ON replan_log(date);
+
+-- 实际用时明细；tasks.actual_min 是它们的合计。
+CREATE TABLE IF NOT EXISTS time_entries (
+  id         TEXT PRIMARY KEY,
+  task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  started_at TEXT NOT NULL,
+  ended_at   TEXT NOT NULL,
+  minutes    INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_time_task ON time_entries(task_id);
+
 -- 只读 ICS 订阅：单行配置（id=1）。外部日历只拉取到本地展示，绝不回写。
 CREATE TABLE IF NOT EXISTS calendar_subscription (
   id             INTEGER PRIMARY KEY CHECK (id = 1),
@@ -233,6 +296,13 @@ export function initDb(dir: string): void {
   ensureColumn('tasks', 'notified_at', 'TEXT')
   ensureColumn('tasks', 'next_occurrence_id', 'TEXT')
   ensureColumn('tasks', 'deleted_batch', 'TEXT')
+  ensureColumn('tasks', 'estimate_min', 'INTEGER')
+  ensureColumn('tasks', 'actual_min', 'INTEGER')
+  ensureColumn('tasks', 'section_id', 'TEXT')
+  ensureColumn('tasks', 'escalate_interval', 'INTEGER')
+  ensureColumn('tasks', 'escalate_until', 'TEXT')
+  ensureColumn('tasks', 'next_escalate_at', 'TEXT')
+  ensureColumn('tasks', 'urgent', 'INTEGER NOT NULL DEFAULT 0')
   const hadSomeday = conn()
     .prepare('PRAGMA table_info(tasks)')
     .all()
@@ -467,6 +537,16 @@ function mapTask(r: Record<string, unknown>): Task {
         ? null
         : Number(r.reminder_offset),
     notifiedAt: (r.notified_at as string) ?? null,
+    estimateMin: r.estimate_min === null || r.estimate_min === undefined ? null : Number(r.estimate_min),
+    actualMin: r.actual_min === null || r.actual_min === undefined ? null : Number(r.actual_min),
+    sectionId: (r.section_id as string) ?? null,
+    escalateInterval:
+      r.escalate_interval === null || r.escalate_interval === undefined
+        ? null
+        : Number(r.escalate_interval),
+    escalateUntil: (r.escalate_until as string) ?? null,
+    nextEscalateAt: (r.next_escalate_at as string) ?? null,
+    urgent: Number(r.urgent ?? 0) === 1,
     completedAt: (r.completed_at as string) ?? null,
     deletedAt: (r.deleted_at as string) ?? null,
     sortOrder: Number(r.sort_order ?? 0),
@@ -483,6 +563,7 @@ export function listTasks(opts: {
   view: ViewKey
   listId?: string
   tagId?: string
+  filterId?: string
   limit?: number
   offset?: number
   dateFrom?: string
@@ -494,6 +575,8 @@ export function listTasks(opts: {
   const in7 = dayStr(addDays(now, 7))
   const tomorrowStart = startOfDay(addDays(now, 1)).toISOString()
   const in8Start = startOfDay(addDays(now, 8)).toISOString()
+  const dow = now.getDay()
+  const weekEnd = dayStr(addDays(now, dow === 0 ? 0 : 7 - dow))
 
   let where = 't.deleted_at IS NULL AND t.parent_id IS NULL'
   const params: unknown[] = []
@@ -552,6 +635,18 @@ export function listTasks(opts: {
         ' AND t.status = 0 AND t.id IN (SELECT task_id FROM task_tags WHERE tag_id = ?)'
       params.push(opts.tagId ?? '')
       break
+    case 'filter': {
+      const filter = opts.filterId ? getSavedFilter(opts.filterId) : null
+      const built = buildFilterSql(filter?.query ?? emptyFilterQuery(), {
+        today,
+        tomorrow,
+        weekEnd,
+        nowIso: now.toISOString()
+      })
+      where += ` AND t.deleted_at IS NULL AND ${queryHasField(filter?.query ?? emptyFilterQuery(), 'status') ? '' : 't.status = 0 AND '}${built.sql}`
+      params.push(...built.params)
+      break
+    }
   }
 
   const sql = `SELECT t.*, ${TAGS_SUBQUERY}, ${SUBTASK_COUNTS}
@@ -663,8 +758,8 @@ export function createTask(input: CreateTaskInput): Task {
     reminderTime(input.dueAt ?? null, input.scheduledDate ?? null, offset)
   conn()
     .prepare(
-      `INSERT INTO tasks (id,list_id,parent_id,title,notes,priority,status,someday,scheduled_date,due_at,due_all_day,rrule,repeat_from,reminder_at,reminder_offset,notified_at,created_at,updated_at,sort_order)
-       VALUES (?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,NULL,?,?,?)`
+      `INSERT INTO tasks (id,list_id,parent_id,title,notes,priority,status,someday,scheduled_date,due_at,due_all_day,rrule,repeat_from,reminder_at,reminder_offset,notified_at,estimate_min,section_id,escalate_interval,escalate_until,next_escalate_at,urgent,created_at,updated_at,sort_order)
+       VALUES (?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,NULL,?,?,?,?,NULL,?,?,?,?)`
     )
     .run(
       id,
@@ -681,6 +776,11 @@ export function createTask(input: CreateTaskInput): Task {
       input.repeatFrom ?? null,
       reminderAt,
       offset,
+      input.estimateMin ?? null,
+      input.sectionId ?? null,
+      input.escalateInterval ?? null,
+      input.escalateUntil ?? null,
+      input.urgent ? 1 : 0,
       now,
       now,
       nextSortOrder(listId, input.parentId ?? null)
@@ -725,6 +825,15 @@ function applyTaskUpdate(id: string, patch: UpdateTaskInput): Task {
   if (patch.repeatFrom !== undefined) set('repeat_from', patch.repeatFrom)
   if (patch.reminderAt !== undefined) set('reminder_at', patch.reminderAt)
   if (patch.reminderOffset !== undefined) set('reminder_offset', patch.reminderOffset)
+  if (patch.estimateMin !== undefined) set('estimate_min', patch.estimateMin)
+  if (patch.actualMin !== undefined) set('actual_min', patch.actualMin)
+  if (patch.sectionId !== undefined) set('section_id', patch.sectionId)
+  if (patch.escalateInterval !== undefined) {
+    set('escalate_interval', patch.escalateInterval)
+    set('next_escalate_at', null)
+  }
+  if (patch.escalateUntil !== undefined) set('escalate_until', patch.escalateUntil)
+  if (patch.urgent !== undefined) set('urgent', patch.urgent ? 1 : 0)
 
   if (
     patch.dueAt !== undefined ||
@@ -742,6 +851,7 @@ function applyTaskUpdate(id: string, patch: UpdateTaskInput): Task {
       patch.reminderOffset !== undefined ? patch.reminderOffset : (cur?.reminder_offset ?? null)
     set('reminder_at', reminderTime(dueAt, scheduled, offset))
     set('notified_at', null)
+    set('next_escalate_at', null)
   }
 
   fields.push('updated_at = ?')
@@ -796,8 +906,9 @@ function changeTaskStatus(id: string, done: boolean): void {
     ) UPDATE tasks SET status = 1, completed_at = ?, updated_at = ?, reminder_at = NULL
       WHERE id IN (SELECT id FROM children)`).run(id, now, now)
     conn0.prepare('UPDATE tasks SET reminder_at = NULL WHERE id = ?').run(id)
+    conn0.prepare('UPDATE tasks SET next_escalate_at = NULL WHERE id = ?').run(id)
   } else {
-    conn0.prepare('UPDATE tasks SET reminder_at = ?, notified_at = NULL WHERE id = ?')
+    conn0.prepare('UPDATE tasks SET reminder_at = ?, notified_at = NULL, next_escalate_at = NULL WHERE id = ?')
       .run(reminderTime(task.dueAt, task.scheduledDate, task.reminderOffset), id)
   }
 }
@@ -853,6 +964,10 @@ function spawnNextOccurrence(task: Task): void {
     rrule: task.rrule,
     repeatFrom: task.repeatFrom,
     reminderOffset: task.reminderOffset,
+    estimateMin: task.estimateMin,
+    sectionId: task.sectionId,
+    escalateInterval: task.escalateInterval,
+    urgent: task.urgent,
     tagNames: task.tags.map((t) => t.name)
   })
   conn().prepare('UPDATE tasks SET next_occurrence_id=? WHERE id=?').run(created.id, task.id)
@@ -884,16 +999,32 @@ export function getDueReminders(nowIsoStr: string): Task[] {
   const rows = conn()
     .prepare(
       `SELECT t.*, ${TAGS_SUBQUERY}, ${SUBTASK_COUNTS} FROM tasks t
-       WHERE t.deleted_at IS NULL AND t.status = 0 AND t.reminder_at IS NOT NULL
-         AND t.reminder_at <= ? AND t.notified_at IS NULL
-       ORDER BY t.reminder_at ASC LIMIT 20`
+       WHERE t.deleted_at IS NULL AND t.status = 0
+         AND (
+           (t.reminder_at IS NOT NULL AND t.reminder_at <= ? AND t.notified_at IS NULL)
+           OR (t.next_escalate_at IS NOT NULL AND t.next_escalate_at <= ?
+               AND (t.escalate_until IS NULL OR t.escalate_until > ?))
+         )
+       ORDER BY COALESCE(t.next_escalate_at, t.reminder_at) ASC LIMIT 20`
     )
-    .all(nowIsoStr) as Record<string, unknown>[]
+    .all(nowIsoStr, nowIsoStr, nowIsoStr) as Record<string, unknown>[]
   return rows.map(mapTask)
 }
 
 export function markReminderSent(id: string): void {
-  conn().prepare('UPDATE tasks SET notified_at = ? WHERE id = ?').run(nowIso(), id)
+  const row = conn()
+    .prepare('SELECT escalate_interval, escalate_until FROM tasks WHERE id = ?')
+    .get(id) as { escalate_interval: number | null; escalate_until: string | null } | undefined
+  const interval = Number(row?.escalate_interval ?? 0)
+  let next: string | null = null
+  if (interval > 0) {
+    const candidate = Date.now() + interval * 60000
+    const until = row?.escalate_until ? Date.parse(row.escalate_until) : Number.NaN
+    if (!Number.isFinite(until) || candidate <= until) next = new Date(candidate).toISOString()
+  }
+  conn()
+    .prepare('UPDATE tasks SET notified_at = ?, next_escalate_at = ? WHERE id = ?')
+    .run(nowIso(), next, id)
 }
 
 /**
@@ -907,7 +1038,7 @@ export function snoozeReminder(id: string, minutes: number): void {
   const now = Date.now()
   conn()
     .prepare(
-      `UPDATE tasks SET reminder_at = ?, notified_at = NULL, updated_at = ?
+      `UPDATE tasks SET reminder_at = ?, notified_at = NULL, next_escalate_at = NULL, updated_at = ?
        WHERE id = ? AND deleted_at IS NULL AND status = 0`
     )
     .run(new Date(now + mins * 60000).toISOString(), new Date(now).toISOString(), id)
@@ -1698,4 +1829,328 @@ export function clearCalendarSubscription(): void {
     conn().prepare('DELETE FROM calendar_events').run()
     conn().prepare('DELETE FROM calendar_subscription WHERE id = 1').run()
   })
+}
+
+// ─────────────────────────────────────────────────────────────
+// 清单分区（Heading）
+// ─────────────────────────────────────────────────────────────
+
+export function getSections(listId: string): ListSection[] {
+  const rows = conn()
+    .prepare('SELECT * FROM list_sections WHERE list_id = ? ORDER BY sort_order ASC, created_at ASC')
+    .all(listId) as Record<string, unknown>[]
+  return rows.map((r) => ({
+    id: r.id as string,
+    listId: r.list_id as string,
+    name: r.name as string,
+    sortOrder: Number(r.sort_order ?? 0),
+    collapsed: Number(r.collapsed ?? 0) === 1,
+    createdAt: r.created_at as string
+  }))
+}
+
+export function createSection(listId: string, name: string): ListSection {
+  const clean = name.trim()
+  if (!clean) throw new Error('分区名称不能为空')
+  const id = randomUUID()
+  const now = nowIso()
+  const max = conn()
+    .prepare('SELECT MAX(sort_order) AS m FROM list_sections WHERE list_id = ?')
+    .get(listId) as { m: number | null }
+  const order = (max.m ?? 0) + 1024
+  conn()
+    .prepare(
+      'INSERT INTO list_sections (id,list_id,name,sort_order,collapsed,created_at) VALUES (?,?,?,?,0,?)'
+    )
+    .run(id, listId, clean, order, now)
+  return { id, listId, name: clean, sortOrder: order, collapsed: false, createdAt: now }
+}
+
+export function updateSection(
+  id: string,
+  patch: { name?: string; collapsed?: boolean; sortOrder?: number }
+): void {
+  const fields: string[] = []
+  const params: unknown[] = []
+  if (patch.name !== undefined) {
+    const clean = patch.name.trim()
+    if (!clean) throw new Error('分区名称不能为空')
+    fields.push('name = ?')
+    params.push(clean)
+  }
+  if (patch.collapsed !== undefined) {
+    fields.push('collapsed = ?')
+    params.push(patch.collapsed ? 1 : 0)
+  }
+  if (patch.sortOrder !== undefined) {
+    fields.push('sort_order = ?')
+    params.push(patch.sortOrder)
+  }
+  if (!fields.length) return
+  params.push(id)
+  conn().prepare(`UPDATE list_sections SET ${fields.join(', ')} WHERE id = ?`).run(...(params as never[]))
+}
+
+export function deleteSection(id: string): void {
+  transaction(() => {
+    conn().prepare('UPDATE tasks SET section_id = NULL WHERE section_id = ?').run(id)
+    conn().prepare('DELETE FROM list_sections WHERE id = ?').run(id)
+  })
+}
+
+// ─────────────────────────────────────────────────────────────
+// 智能过滤器
+// ─────────────────────────────────────────────────────────────
+
+function mapSavedFilter(row: Record<string, unknown>): SavedFilter {
+  let query: FilterQuery = emptyFilterQuery()
+  try {
+    const parsed = JSON.parse(row.query_json as string) as FilterQuery
+    if (parsed && Array.isArray(parsed.conditions)) query = parsed
+  } catch {
+    /* corrupted filter falls back to empty */
+  }
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    query,
+    color: (row.color as string) ?? null,
+    pinned: Number(row.pinned ?? 0),
+    sortOrder: Number(row.sort_order ?? 0),
+    createdAt: row.created_at as string
+  }
+}
+
+export function getSavedFilters(): SavedFilter[] {
+  const rows = conn()
+    .prepare('SELECT * FROM saved_filters ORDER BY pinned DESC, sort_order ASC, created_at ASC')
+    .all() as Record<string, unknown>[]
+  return rows.map(mapSavedFilter)
+}
+
+export function getSavedFilter(id: string): SavedFilter | null {
+  const row = conn().prepare('SELECT * FROM saved_filters WHERE id = ?').get(id) as
+    | Record<string, unknown>
+    | undefined
+  return row ? mapSavedFilter(row) : null
+}
+
+export function createSavedFilter(input: {
+  name: string
+  query: FilterQuery
+  color?: string | null
+}): SavedFilter {
+  const clean = input.name.trim()
+  if (!clean) throw new Error('过滤器名称不能为空')
+  const id = randomUUID()
+  const now = nowIso()
+  const max = conn().prepare('SELECT MAX(sort_order) AS m FROM saved_filters').get() as {
+    m: number | null
+  }
+  const order = (max.m ?? 0) + 1024
+  conn()
+    .prepare(
+      'INSERT INTO saved_filters (id,name,query_json,color,pinned,sort_order,created_at) VALUES (?,?,?,?,0,?,?)'
+    )
+    .run(id, clean, JSON.stringify(input.query), input.color ?? null, order, now)
+  return {
+    id,
+    name: clean,
+    query: input.query,
+    color: input.color ?? null,
+    pinned: 0,
+    sortOrder: order,
+    createdAt: now
+  }
+}
+
+export function updateSavedFilter(
+  id: string,
+  patch: { name?: string; query?: FilterQuery; color?: string | null; pinned?: number }
+): SavedFilter {
+  const fields: string[] = []
+  const params: unknown[] = []
+  if (patch.name !== undefined) {
+    const clean = patch.name.trim()
+    if (!clean) throw new Error('过滤器名称不能为空')
+    fields.push('name = ?')
+    params.push(clean)
+  }
+  if (patch.query !== undefined) {
+    fields.push('query_json = ?')
+    params.push(JSON.stringify(patch.query))
+  }
+  if (patch.color !== undefined) {
+    fields.push('color = ?')
+    params.push(patch.color)
+  }
+  if (patch.pinned !== undefined) {
+    fields.push('pinned = ?')
+    params.push(patch.pinned ? 1 : 0)
+  }
+  if (fields.length) {
+    params.push(id)
+    conn().prepare(`UPDATE saved_filters SET ${fields.join(', ')} WHERE id = ?`).run(...(params as never[]))
+  }
+  return getSavedFilter(id)!
+}
+
+export function deleteSavedFilter(id: string): void {
+  conn().prepare('DELETE FROM saved_filters WHERE id = ?').run(id)
+}
+
+function filterContext(now: Date): {
+  today: string
+  tomorrow: string
+  weekEnd: string
+  nowIso: string
+} {
+  const dow = now.getDay()
+  return {
+    today: dayStr(now),
+    tomorrow: dayStr(addDays(now, 1)),
+    weekEnd: dayStr(addDays(now, dow === 0 ? 0 : 7 - dow)),
+    nowIso: now.toISOString()
+  }
+}
+
+export function countFilter(query: FilterQuery): number {
+  const built = buildFilterSql(query, filterContext(new Date()))
+  const row = conn()
+    .prepare(
+      `SELECT COUNT(*) AS count FROM tasks t
+       WHERE t.deleted_at IS NULL AND t.parent_id IS NULL
+         AND ${queryHasField(query, 'status') ? '' : 't.status = 0 AND '}${built.sql}`
+    )
+    .get(...(built.params as never[])) as { count: number | null }
+  return Number(row.count ?? 0)
+}
+
+// ─────────────────────────────────────────────────────────────
+// 每日收尾 / 关机仪式
+// ─────────────────────────────────────────────────────────────
+
+function mapDayReview(row: Record<string, unknown>): DayReview {
+  return {
+    date: row.date as string,
+    rating: row.rating === null || row.rating === undefined ? null : Number(row.rating),
+    note: (row.note as string) ?? '',
+    reviewedAt: row.reviewed_at as string
+  }
+}
+
+export function getDayReview(date: string): DayReview | null {
+  const row = conn().prepare('SELECT * FROM day_reviews WHERE date = ?').get(date) as
+    | Record<string, unknown>
+    | undefined
+  return row ? mapDayReview(row) : null
+}
+
+export function saveDayReview(date: string, rating: number | null, note: string): DayReview {
+  const reviewedAt = nowIso()
+  conn()
+    .prepare(
+      `INSERT INTO day_reviews (date,rating,note,reviewed_at) VALUES (?,?,?,?)
+       ON CONFLICT(date) DO UPDATE SET rating = excluded.rating, note = excluded.note, reviewed_at = excluded.reviewed_at`
+    )
+    .run(date, rating, note ?? '', reviewedAt)
+  return { date, rating, note: note ?? '', reviewedAt }
+}
+
+export function getReviewedDates(from: string, to: string): string[] {
+  const rows = conn()
+    .prepare('SELECT date FROM day_reviews WHERE date BETWEEN ? AND ? ORDER BY date ASC')
+    .all(from, to) as { date: string }[]
+  return rows.map((row) => row.date)
+}
+
+export function shouldPromptShutdown(now = new Date()): boolean {
+  if (getSetting('shutdown_enabled') === '0') return false
+  const today = dayStr(now)
+  if (getDayReview(today)) return false
+  const time = getSetting('shutdown_time') ?? '17:30'
+  const [h, m] = time.split(':').map(Number)
+  const target = new Date(now)
+  target.setHours(Number.isFinite(h) ? h : 17, Number.isFinite(m) ? m : 30, 0, 0)
+  return now.getTime() >= target.getTime()
+}
+
+// ─────────────────────────────────────────────────────────────
+// 过期任务 Replan
+// ─────────────────────────────────────────────────────────────
+
+export function listOverdueTasks(now = new Date()): Task[] {
+  const today = dayStr(now)
+  const rows = conn()
+    .prepare(
+      `SELECT t.*, ${TAGS_SUBQUERY}, ${SUBTASK_COUNTS} FROM tasks t
+       WHERE t.deleted_at IS NULL AND t.parent_id IS NULL AND t.status = 0 AND t.someday = 0
+         AND ((t.scheduled_date IS NOT NULL AND t.scheduled_date < ?)
+           OR (t.due_at IS NOT NULL AND t.due_at < ?))
+       ORDER BY COALESCE(t.scheduled_date, '') ASC, t.priority DESC, t.sort_order ASC
+       LIMIT 200`
+    )
+    .all(today, now.toISOString()) as Record<string, unknown>[]
+  return rows.map(mapTask)
+}
+
+export type ReplanAction = 'complete' | 'today' | 'tomorrow' | 'date' | 'someday'
+
+export function replanTask(id: string, action: ReplanAction, date?: string | null): Task | null {
+  const now = new Date()
+  const today = dayStr(now)
+  switch (action) {
+    case 'complete':
+      setTaskStatus(id, true)
+      break
+    case 'today':
+      updateTask(id, { scheduledDate: today, someday: false })
+      break
+    case 'tomorrow':
+      updateTask(id, { scheduledDate: dayStr(addDays(now, 1)), someday: false })
+      break
+    case 'date':
+      if (!date) throw new Error('请选择日期')
+      assertDateField(date, '计划日期', true)
+      updateTask(id, { scheduledDate: date, someday: false })
+      break
+    case 'someday':
+      updateTask(id, { someday: true, scheduledDate: null, dueAt: null })
+      break
+  }
+  conn()
+    .prepare('INSERT INTO replan_log (id,date,task_id,action,created_at) VALUES (?,?,?,?,?)')
+    .run(randomUUID(), today, id, action, nowIso())
+  return getTask(id)
+}
+
+export function countReplanActions(date: string): number {
+  const row = conn()
+    .prepare('SELECT COUNT(*) AS count FROM replan_log WHERE date = ?')
+    .get(date) as { count: number | null }
+  return Number(row.count ?? 0)
+}
+
+// ─────────────────────────────────────────────────────────────
+// 实际用时
+// ─────────────────────────────────────────────────────────────
+
+export function addTimeEntry(taskId: string, startedAt: string, endedAt: string): Task {
+  const start = new Date(startedAt).getTime()
+  const end = new Date(endedAt).getTime()
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    throw new Error('计时区间无效')
+  }
+  const minutes = Math.max(1, Math.round((end - start) / 60000))
+  transaction(() => {
+    conn()
+      .prepare(
+        'INSERT INTO time_entries (id,task_id,started_at,ended_at,minutes,created_at) VALUES (?,?,?,?,?,?)'
+      )
+      .run(randomUUID(), taskId, new Date(start).toISOString(), new Date(end).toISOString(), minutes, nowIso())
+    conn()
+      .prepare('UPDATE tasks SET actual_min = COALESCE(actual_min, 0) + ?, updated_at = ? WHERE id = ?')
+      .run(minutes, nowIso(), taskId)
+  })
+  return getTask(taskId)!
 }
