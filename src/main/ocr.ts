@@ -24,7 +24,7 @@ let enginePromise: Promise<OcrEngine> | null = null
 function paddleEngine(): Promise<OcrEngine> {
   if (!enginePromise) {
     enginePromise = createEngine({
-      recognitionScoreThreshold: 0.3,
+      recognitionScoreThreshold: 0.1,
       recognitionBatchSize: 8
     }).catch((error) => {
       enginePromise = null
@@ -34,14 +34,21 @@ function paddleEngine(): Promise<OcrEngine> {
   return enginePromise
 }
 
-function upscaleForOcr(buffer: Buffer): Buffer {
+/** 小图识别前做适度放大（仅原图识别失败后作为第二策略使用）。 */
+function upscaleForOcr(buffer: Buffer, targetLongest: number): Buffer {
   try {
     const image = nativeImage.createFromBuffer(buffer)
     const size = image.getSize()
     const longest = Math.max(size.width, size.height)
-    if (longest > 0 && longest < 1200) {
-      const scale = Math.min(2, Math.max(2, Math.ceil(1200 / longest)))
-      return image.resize({ width: size.width * scale, height: size.height * scale, quality: 'best' }).toPNG()
+    if (longest > 0 && longest < targetLongest) {
+      const scale = Math.min(4, targetLongest / longest)
+      return image
+        .resize({
+          width: Math.round(size.width * scale),
+          height: Math.round(size.height * scale),
+          quality: 'best'
+        })
+        .toPNG()
     }
   } catch {
     /* use original bytes */
@@ -49,12 +56,13 @@ function upscaleForOcr(buffer: Buffer): Buffer {
   return buffer
 }
 
-async function runPaddleOcr(png: Buffer): Promise<OcrResult> {
+/** 用 tiny 引擎识别，空结果时返回 null（不抛错）。 */
+async function tryPaddle(png: Buffer): Promise<OcrResult | null> {
   const engine = await paddleEngine()
-  const result = await engine.recognizeEncoded(upscaleForOcr(png))
+  const result = await engine.recognizeEncoded(png)
   const lines = result.lines.map((line) => line.text.trim()).filter(Boolean)
   const text = normalizeCaptureText(lines.join('\n'))
-  if (!text) throw new Error('没有识别到文字')
+  if (!text) return null
   return { text, lines: text.split('\n').map((line) => line.trim()).filter(Boolean) }
 }
 
@@ -101,17 +109,42 @@ function runWindowsOcr(png: Buffer): Promise<string> {
   })
 }
 
-/** Recognise one PNG buffer: PaddleOCR tiny first, Windows OCR as fallback. */
+/** Recognise one PNG buffer with a three-tier strategy:
+ *  1. tiny 模型直接识别原图（小图原样识别效果最好，不做放大）
+ *  2. 放大后重试（对极小/低分辨率截图，放大到长边 ≥960 后再试）
+ *  3. Windows OCR 兜底（本地运行时加载失败或前两步都空时）
+ */
 export async function ocrImageBuffer(buffer: Buffer): Promise<OcrResult> {
+  // 第 1 层：原样识别
   try {
-    return await runPaddleOcr(buffer)
+    const direct = await tryPaddle(buffer)
+    if (direct) return direct
+    console.warn('PADDLE_OCR_EMPTY direct')
   } catch (error) {
-    console.warn('PADDLE_OCR_FAILED', error)
-    if (process.platform !== 'win32') throw error
+    console.warn('PADDLE_OCR_FAILED direct', error)
   }
-  const text = normalizeCaptureText(await runWindowsOcr(buffer))
-  if (!text) throw new Error('没有识别到文字')
-  return { text, lines: text.split('\n').map((line) => line.trim()).filter(Boolean) }
+
+  // 第 2 层：放大后重试（可能放大引入伪影，所以只作为补救）
+  try {
+    const scaled = upscaleForOcr(buffer, 960)
+    if (scaled !== buffer) {
+      const retry = await tryPaddle(scaled)
+      if (retry) return retry
+      console.warn('PADDLE_OCR_EMPTY upscaled')
+    }
+  } catch (error) {
+    console.warn('PADDLE_OCR_FAILED upscaled', error)
+  }
+
+  // 第 3 层：Windows OCR 兜底
+  if (process.platform === 'win32') {
+    const text = normalizeCaptureText(await runWindowsOcr(buffer))
+    if (text) {
+      return { text, lines: text.split('\n').map((line) => line.trim()).filter(Boolean) }
+    }
+  }
+
+  throw new Error('没有识别到文字')
 }
 
 /** Read one image from the clipboard and recognise it. */
