@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@arcships/light-ocr':
+        specifier: 0.5.9
+        version: 0.5.9
       '@arcships/light-ocr-tiny':
         specifier: 0.1.8
         version: 0.1.8
@@ -106,6 +109,9 @@ packages:
     os: [linux]
     libc: [musl]
 
+  '@arcships/light-ocr-model-ppocrv6-small@0.3.4':
+    resolution: {integrity: sha512-F2Rjx3xoiKw1eUc/DW5k5/t1AlvWfReUDTdpRdQKNCDz5Y8YYif+15CHdPz7Wdt/Nza7drDOM3NTGUIuA20ERw==}
+
   '@arcships/light-ocr-model-ppocrv6-tiny@0.1.0':
     resolution: {integrity: sha512-AIV0oRSKADvAmguBJwFtPo+Si+p/ECbNTUvmmmZv+DqNOOO58txv8+JMBi486di2rXStsVuAcwtdp7ZYtUgMhQ==}
 
@@ -137,6 +143,11 @@ packages:
     engines: {node: '>=22.0.0'}
     cpu: [x64]
     os: [win32]
+
+  '@arcships/light-ocr@0.5.9':
+    resolution: {integrity: sha512-M7/eKlbd+Z7nKMX7Ic7/s2mAn2zuNH1/7uJJxTzOWoqd3p7lqKmeUduAmv6vzGrt5meev/v63/DhutVXkodn9Q==}
+    engines: {node: '>=22.0.0'}
+    hasBin: true
 
   '@babel/code-frame@7.29.7':
     resolution: {integrity: sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw==}
@@ -1669,6 +1680,8 @@ snapshots:
   '@arcships/light-ocr-linux-x64-musl@0.5.9':
     optional: true
 
+  '@arcships/light-ocr-model-ppocrv6-small@0.3.4': {}
+
   '@arcships/light-ocr-model-ppocrv6-tiny@0.1.0': {}
 
   '@arcships/light-ocr-runtime@0.1.9':
@@ -1695,6 +1708,14 @@ snapshots:
 
   '@arcships/light-ocr-win32-x64@0.5.9':
     optional: true
+
+  '@arcships/light-ocr@0.5.9':
+    dependencies:
+      '@arcships/light-ocr-model-ppocrv6-small': 0.3.4
+      '@arcships/light-ocr-runtime': 0.1.9
+    transitivePeerDependencies:
+      - '@arcships/light-ocr-amdnpu-linux-x64-gnu'
+      - '@arcships/light-ocr-openvino-linux-x64-gnu'
 
   '@babel/code-frame@7.29.7':
     dependencies:

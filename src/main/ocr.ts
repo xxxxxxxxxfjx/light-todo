@@ -2,7 +2,7 @@ import { app, clipboard, nativeImage } from 'electron'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { createEngine, type OcrEngine } from '@arcships/light-ocr-tiny'
+import { createEngine, type OcrEngine } from '@arcships/light-ocr'
 import { normalizeCaptureText } from '../shared/capture-parse.ts'
 
 function ocrScriptPath(): string {
@@ -18,7 +18,7 @@ export interface OcrResult {
   lines: string[]
 }
 
-/** PaddleOCR PP-OCRv6 Tiny is the primary engine. It is local and ~6 MB. */
+/** PaddleOCR PP-OCRv6 Small is the primary engine (~30MB, higher accuracy than Tiny). */
 let enginePromise: Promise<OcrEngine> | null = null
 
 function paddleEngine(): Promise<OcrEngine> {
@@ -110,9 +110,9 @@ function runWindowsOcr(png: Buffer): Promise<string> {
 }
 
 /** Recognise one PNG buffer with a three-tier strategy:
- *  1. tiny 模型直接识别原图（小图原样识别效果最好，不做放大）
- *  2. 放大后重试（对极小/低分辨率截图，放大到长边 ≥960 后再试）
- *  3. Windows OCR 兜底（本地运行时加载失败或前两步都空时）
+ *  1. Small 模型直接识别原图
+ *  2. 放大后重试（对极小/低分辨率截图）
+ *  3. Windows OCR 兜底
  */
 export async function ocrImageBuffer(buffer: Buffer): Promise<OcrResult> {
   // 第 1 层：原样识别
@@ -124,7 +124,7 @@ export async function ocrImageBuffer(buffer: Buffer): Promise<OcrResult> {
     console.warn('PADDLE_OCR_FAILED direct', error)
   }
 
-  // 第 2 层：放大后重试（可能放大引入伪影，所以只作为补救）
+  // 第 2 层：放大后重试
   try {
     const scaled = upscaleForOcr(buffer, 960)
     if (scaled !== buffer) {

@@ -1,6 +1,6 @@
 {
   "name": "lighttodo",
-  "version": "0.6.17",
+  "version": "0.6.18",
   "private": true,
   "description": "轻单 LightTodo — Windows 上最快的中文待办",
   "main": "./out/main/index.js",
@@ -28,6 +28,7 @@
     "dist:mac": "node scripts/package-mac.cjs"
   },
   "dependencies": {
+    "@arcships/light-ocr": "0.5.9",
     "@arcships/light-ocr-tiny": "0.1.8",
     "@tanstack/react-virtual": "^3.14.25",
     "date-fns": "^4.4.0",
@@ -68,7 +69,8 @@
       "node_modules/@arcships/**/*"
     ],
     "asarUnpack": [
-      "node_modules/@arcships/**/*"
+      "node_modules/@arcships/**/*",
+      "node_modules/@paddlejs/**/*"
     ],
     "extraResources": [
       {
