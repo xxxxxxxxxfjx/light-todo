@@ -6,12 +6,14 @@ import {
   BarChart3,
   CalendarDays,
   CheckCircle2,
+  Copy,
   Inbox,
   ListTodo,
   PlusCircle,
   RefreshCw
 } from 'lucide-react'
-import type { WeeklyReviewData } from '@shared/types'
+import type { Task, WeeklyReviewData } from '@shared/types'
+import { buildWeekReport } from '../lib/week-report'
 import { useStore } from '../store'
 import { parseLocalDate } from '../lib/format'
 import '../review.css'
@@ -34,8 +36,10 @@ function dateRangeText(first?: string, last?: string): string {
 }
 
 export function WeeklyReview(): React.JSX.Element {
-  const { setView, setCalendarJumpDate } = useStore()
+  const { setView, setCalendarJumpDate, showToast } = useStore()
   const [data, setData] = useState<WeeklyReviewData | null>(null)
+  const [completed, setCompleted] = useState<Task[]>([])
+  const [copying, setCopying] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
@@ -48,8 +52,14 @@ export function WeeklyReview(): React.JSX.Element {
       setLoading(true)
       setError('')
       try {
-        const next = await window.api.review.get()
-        if (!cancelled && request === requestId) setData(next)
+        const [next, done] = await Promise.all([
+          window.api.review.get(),
+          window.api.tasks.list({ view: 'completed', limit: 1000 })
+        ])
+        if (!cancelled && request === requestId) {
+          setData(next)
+          setCompleted(done)
+        }
       } catch (err) {
         console.error(err)
         if (!cancelled && request === requestId) setError('周复盘加载失败，请重试')
@@ -82,6 +92,30 @@ export function WeeklyReview(): React.JSX.Element {
   const maxValue = Math.max(1, ...days.flatMap((day) => [day.completed, day.created]))
   const todayKey = days[days.length - 1]?.date ?? format(new Date(), 'yyyy-MM-dd')
   const rangeText = dateRangeText(days[0]?.date, days[days.length - 1]?.date)
+  const weekReport = useMemo(() => {
+    if (!days.length) return ''
+    const start = days[0].date
+    const end = days[days.length - 1].date
+    const inRange = completed.filter((task) => {
+      if (!task.completedAt) return false
+      const key = format(new Date(task.completedAt), 'yyyy-MM-dd')
+      return key >= start && key <= end
+    })
+    return buildWeekReport(start, end, inRange)
+  }, [completed, days])
+
+  const copyWeekReport = async (): Promise<void> => {
+    if (copying || !weekReport) return
+    setCopying(true)
+    try {
+      await window.api.capture.copyText(weekReport)
+      showToast('周报已复制')
+    } catch {
+      showToast('复制失败，请手动选择文本')
+    } finally {
+      setCopying(false)
+    }
+  }
   const sortedLists = useMemo(
     () =>
       [...(data?.lists ?? [])].sort(
@@ -173,6 +207,19 @@ export function WeeklyReview(): React.JSX.Element {
                 )
               })}
             </div>
+
+            <section className="review-panel review-report-panel" aria-labelledby="review-report-title">
+              <div className="review-panel-head">
+                <div>
+                  <h2 id="review-report-title">本周周报</h2>
+                  <p>按完成时间汇总最近 7 天；短的在前，相似的任务挨在一起</p>
+                </div>
+                <button className="mini-btn" disabled={copying || !weekReport} onClick={() => void copyWeekReport()}>
+                  <Copy size={13} /> {copying ? '复制中' : '复制周报'}
+                </button>
+              </div>
+              <pre className="review-report-text">{weekReport}</pre>
+            </section>
 
             {empty ? (
               <div className="review-empty">

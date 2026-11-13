@@ -273,17 +273,21 @@ export function QuickAdd(): React.JSX.Element {
         )}
 
         <div className="qa-foot">
-          <span>
-            <kbd>Enter</kbd> 保存
-          </span>
-          <span>
-            <kbd>{mod}</kbd> + <kbd>Enter</kbd> 继续添加
-          </span>
-          <button className="qa-template-save" title="保存当前输入为模板" disabled={!text.trim()} onClick={() => void saveTemplate()}>存模板</button>
-          <span className="qa-syntax">支持：明天 / !高 / #清单 / @标签 / =30m / &gt;今天 / &lt;周五</span>
-          <button className="qa-submit" disabled={saving} onClick={() => submit(false)}>
-            {saving ? '保存中…' : '添加'}
-          </button>
+          <div className="qa-foot-left">
+            <span>
+              <kbd>Enter</kbd> 保存
+            </span>
+            <span>
+              <kbd>{mod}</kbd> + <kbd>Enter</kbd> 继续添加
+            </span>
+            <button className="qa-template-save" title="保存当前输入为模板" disabled={!text.trim()} onClick={() => void saveTemplate()}>存模板</button>
+          </div>
+          <div className="qa-foot-right">
+            <span className="qa-syntax">支持：明天 / !高 / #清单 / @标签 / =30m / &gt;今天 / &lt;周五</span>
+            <button className="qa-submit" disabled={saving} onClick={() => submit(false)}>
+              {saving ? '保存中…' : '添加'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

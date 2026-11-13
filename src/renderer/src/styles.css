@@ -1272,6 +1272,7 @@ kbd {
 .qa-foot {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   flex-wrap: wrap;
   gap: 7px 14px;
   padding: 9px 18px;
@@ -1280,11 +1281,13 @@ kbd {
   font-size: 10.5px;
   color: var(--text-3);
 }
+.qa-foot-left, .qa-foot-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.qa-foot-right { margin-left: auto; justify-content: flex-end; }
 .qa-foot > span { flex: none; white-space: nowrap; }
-.qa-foot .qa-submit { flex: none; margin-left: 8px; }
+.qa-foot .qa-submit { flex: none; margin-left: 4px; }
 .qa-syntax {
-  margin-left: auto;
   opacity: 0.85;
+  white-space: nowrap;
 }
 .qa-submit {
   height: 26px;
@@ -2464,6 +2467,8 @@ body.calendar-resizing, body.calendar-resizing * { cursor:row-resize !important;
 .shortcut-recorder:hover { border-color: var(--accent); }
 .shortcut-recorder.recording { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); color: var(--accent); }
 .set-row .set-hint { max-width: 520px; }
+.shortcut-row .set-label { min-width: 108px; }
+.shortcut-row .set-hint { flex: 1; min-width: 180px; }
 
 /* ── 截图任务卡 ── */
 .overlay.capture-overlay { align-items: center; justify-content: center; padding: 24px; }

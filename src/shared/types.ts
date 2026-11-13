@@ -219,6 +219,17 @@ export interface CaptureResult {
   lines: string[]
 }
 
+export type ShortcutKind = 'quickAdd' | 'clipboard' | 'ocr'
+
+export interface ShortcutInfo {
+  kind: ShortcutKind
+  label: string
+  accelerator: string
+  defaultAccelerator: string
+  registered: boolean
+  hint: string
+}
+
 export interface SidebarData {
   folders: Folder[]
   lists: List[]

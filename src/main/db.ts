@@ -486,7 +486,7 @@ function seedIfEmpty(): void {
     const welcome = createTask({
       title: '欢迎使用轻单 👋',
       notes:
-        '这是一个本地优先的待办应用：\n\n- 按 **Ctrl+Shift+Space** 随时记下想法\n- 在左侧创建清单，用 `#清单` 和 `@标签` 快速归类\n- 所有数据都保存在你自己的电脑上',
+        '这是一个本地优先的待办应用：\n\n- 按 **Ctrl+Alt+Space** 随时记下想法\n- 在左侧创建清单，用 `#清单` 和 `@标签` 快速归类\n- 所有数据都保存在你自己的电脑上',
       listId: null,
       scheduledDate: today,
       priority: 1

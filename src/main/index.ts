@@ -23,10 +23,11 @@ import { registerIpc } from './ipc'
 import { backupNow, registerDataIpc } from './data'
 import { registerPet, schedulePetCreation, stopPet, togglePet, notifyTaskWindows } from './pet'
 import { registerIsland, stopIsland, toggleIsland, notifyIsland } from './island'
-import { ocrImageBuffer } from './ocr'
+import { ocrImageBuffer, closeOcrEngine } from './ocr'
 import { captureScreenRegion } from './capture'
+import { migrateLegacyDatabase } from './data-migrate'
 import { updateTaskbarBadge } from './badge'
-import type { Task } from '../shared/types'
+import type { ShortcutInfo, ShortcutKind, Task } from '../shared/types'
 
 const T0 = Date.now()
 const isDev = !app.isPackaged
@@ -98,6 +99,26 @@ function iconPath(): string {
   return candidates.find((p) => existsSync(p)) ?? ''
 }
 
+function windowIconPath(): string {
+  const candidates = [
+    join(process.resourcesPath, 'icon.ico'),
+    join(app.getAppPath(), 'build', 'icon.ico'),
+    join(process.resourcesPath, 'icon.png'),
+    join(app.getAppPath(), 'build', 'icon.png')
+  ]
+  return candidates.find((p) => existsSync(p)) ?? ''
+}
+
+function trayIconPath(): string {
+  const candidates = [
+    join(app.getAppPath(), 'build', 'tray.png'),
+    join(process.resourcesPath, 'tray.png'),
+    join(app.getAppPath(), 'build', 'icon.png'),
+    join(process.resourcesPath, 'icon.png')
+  ]
+  return candidates.find((p) => existsSync(p)) ?? ''
+}
+
 function showMain(): void {
   if (isQuitting) return
   if (!app.isReady()) { app.once('ready', showMain); return }
@@ -127,6 +148,8 @@ function createWindow(): void {
     minHeight: 520,
     show: false,
     title: '轻单',
+    icon: windowIconPath() || undefined,
+    skipTaskbar: false,
     titleBarStyle: 'hidden',
     ...(process.platform === 'win32'
       ? {
@@ -297,22 +320,79 @@ async function captureAndOcr(): Promise<void> {
   }
 }
 
-const DEFAULT_OCR_SHORTCUT = 'CommandOrControl+Alt+O'
-let activeOcrShortcut = ''
+const SHORTCUT_DEFAULTS: Record<ShortcutKind, string> = {
+  quickAdd: 'CommandOrControl+Alt+Space',
+  clipboard: 'CommandOrControl+Alt+C',
+  ocr: 'CommandOrControl+Alt+Shift+O'
+}
+const SHORTCUT_SETTINGS: Record<ShortcutKind, string> = {
+  quickAdd: 'shortcut_quick_add',
+  clipboard: 'shortcut_clipboard',
+  ocr: 'ocr_shortcut'
+}
+const SHORTCUT_LABELS: Record<ShortcutKind, string> = {
+  quickAdd: '全局快速添加',
+  clipboard: '剪贴板捕获',
+  ocr: '截图识别'
+}
+const SHORTCUT_HINTS: Record<ShortcutKind, string> = {
+  quickAdd: '任意界面唤起快速添加',
+  clipboard: '把剪贴板文字直接变成任务',
+  ocr: '框选屏幕 → OCR → 截图任务卡'
+}
+const activeShortcuts: Partial<Record<ShortcutKind, string>> = {}
 
-/** Register (or replace) the screenshot OCR shortcut. Returns false when occupied. */
-function registerOcrShortcut(accelerator: string): boolean {
-  if (activeOcrShortcut) {
-    globalShortcut.unregister(activeOcrShortcut)
-    activeOcrShortcut = ''
+function shortcutRunner(kind: ShortcutKind): () => void {
+  if (kind === 'quickAdd') return () => quickAdd()
+  if (kind === 'clipboard') return () => void captureClipboard()
+  return () => void captureAndOcr()
+}
+
+/** Register (or replace) one global shortcut. Returns false when occupied. */
+function registerShortcut(kind: ShortcutKind, accelerator: string): boolean {
+  const previous = activeShortcuts[kind]
+  if (previous) {
+    globalShortcut.unregister(previous)
+    delete activeShortcuts[kind]
   }
   if (!accelerator) return true
   try {
-    const ok = globalShortcut.register(accelerator, () => void captureAndOcr())
-    if (ok) activeOcrShortcut = accelerator
+    const ok = globalShortcut.register(accelerator, shortcutRunner(kind))
+    if (ok) activeShortcuts[kind] = accelerator
     return ok
   } catch {
     return false
+  }
+}
+
+function shortcutInfo(): ShortcutInfo[] {
+  return (Object.keys(SHORTCUT_DEFAULTS) as ShortcutKind[]).map((kind) => ({
+    kind,
+    label: SHORTCUT_LABELS[kind],
+    accelerator: activeShortcuts[kind] ?? getSetting(SHORTCUT_SETTINGS[kind]) ?? SHORTCUT_DEFAULTS[kind],
+    defaultAccelerator: SHORTCUT_DEFAULTS[kind],
+    registered: !!activeShortcuts[kind],
+    hint: SHORTCUT_HINTS[kind]
+  }))
+}
+
+function registerAllShortcuts(): void {
+  for (const kind of Object.keys(SHORTCUT_DEFAULTS) as ShortcutKind[]) {
+    const preferred = getSetting(SHORTCUT_SETTINGS[kind]) ?? SHORTCUT_DEFAULTS[kind]
+    if (registerShortcut(kind, preferred)) continue
+    log(`SHORTCUT_FAILED ${kind} ${preferred}`)
+    if (kind !== 'ocr') continue
+    // OCR 默认键被占用时退到更少冲突的组合，并把实际生效值写回设置。
+    for (const fallback of [
+      'CommandOrControl+Alt+Shift+O',
+      'CommandOrControl+Shift+Alt+S',
+      'CommandOrControl+Alt+P'
+    ]) {
+      if (registerShortcut('ocr', fallback)) {
+        setSetting(SHORTCUT_SETTINGS.ocr, fallback)
+        break
+      }
+    }
   }
 }
 
@@ -403,7 +483,7 @@ async function runE2E(win: BrowserWindow, file: string): Promise<void> {
 }
 
 function createTray(): void {
-  const p = iconPath()
+  const p = trayIconPath()
   if (!p) {
     console.warn('TRAY_ICON_MISSING')
     return
@@ -423,7 +503,7 @@ function createTray(): void {
   tray.setToolTip('轻单 LightTodo')
   const menu = Menu.buildFromTemplate([
     { label: '打开轻单', click: showMain },
-    { label: '新建任务', accelerator: 'CommandOrControl+Shift+Space', click: quickAdd },
+    { label: '新建任务', click: quickAdd },
     {
       label: '收工 / 今日收尾',
       click: () => {
@@ -443,6 +523,20 @@ function createTray(): void {
     }
   ])
   tray.setContextMenu(menu)
+  // Windows 11 默认把新托盘图标放进「^」溢出区；第一次启动给个气泡提示。
+  if (process.platform === 'win32' && getSetting('tray_hint_shown') !== '1') {
+    setTimeout(() => {
+      try {
+        tray?.displayBalloon({
+          title: '轻单还在运行',
+          content: '窗口关闭后会驻留在右下角托盘；找不到时点任务栏的「^」。'
+        })
+        setSetting('tray_hint_shown', '1')
+      } catch {
+        /* best effort */
+      }
+    }, 2500)
+  }
   // macOS 单击菜单栏图标应展开菜单，不再额外抢焦点打开主窗口。
   if (process.platform !== 'darwin') tray.on('click', showMain)
 }
@@ -589,13 +683,6 @@ function startReminderLoop(): void {
   setInterval(tick, 30000)
 }
 
-function registerShortcuts(): void {
-  const ok = globalShortcut.register('CommandOrControl+Shift+Space', quickAdd)
-  if (!ok) console.warn('GLOBAL_SHORTCUT_FAILED')
-  const clipOk = globalShortcut.register('CommandOrControl+Alt+V', () => void captureClipboard())
-  if (!clipOk) console.warn('CLIPBOARD_SHORTCUT_FAILED')
-}
-
 function handleProtocolUrl(url: string): void {
   console.log('PROTOCOL_URL', url)
 
@@ -671,7 +758,19 @@ function setupIntegration(): void {
 
 if (ownsInstance) app.whenReady().then(() => {
   app.setAppUserModelId('com.lighttodo.app')
-  initDb(resolveDataDir())
+  const dataDir = resolveDataDir()
+  const migration =
+    app.isPackaged && process.env.PORTABLE_EXECUTABLE_DIR
+      ? migrateLegacyDatabase({
+          currentDir: dataDir,
+          appDataDir: app.getPath('appData'),
+          executableDir: process.env.PORTABLE_EXECUTABLE_DIR
+        })
+      : { migrated: false }
+  if (migration.migrated) {
+    log(`DATA_MIGRATED from=${migration.from} tasks=${migration.tasks}`)
+  }
+  initDb(dataDir)
   // Trash cleanup is not needed before the first paint; defer it so the
   // window can become visible without waiting for two extra writes.
   const savedTheme = getSetting('ui_theme')
@@ -682,11 +781,28 @@ if (ownsInstance) app.whenReady().then(() => {
     setSetting('ui_theme', theme)
     return { ...syncWindowTheme(), dark: nativeTheme.shouldUseDarkColors }
   })
-  ipcMain.handle('shortcuts:ocr', () => activeOcrShortcut || DEFAULT_OCR_SHORTCUT)
-  ipcMain.handle('shortcuts:ocrStatus', () => ({
-    accelerator: activeOcrShortcut,
-    registered: activeOcrShortcut ? globalShortcut.isRegistered(activeOcrShortcut) : false
-  }))
+  ipcMain.handle('shortcuts:list', () => shortcutInfo())
+  ipcMain.handle('shortcuts:set', (_event, kind: ShortcutKind, accelerator: string) => {
+    if (!(kind in SHORTCUT_DEFAULTS)) throw new Error('未知快捷键')
+    if (typeof accelerator !== 'string' || !accelerator.trim()) throw new Error('快捷键不能为空')
+    const clean = accelerator.trim()
+    if (!/^[A-Za-z0-9+_-]{3,64}$/.test(clean)) throw new Error('快捷键格式无效')
+    const previous = activeShortcuts[kind]
+    if (!registerShortcut(kind, clean)) {
+      if (previous) registerShortcut(kind, previous)
+      throw new Error('这个快捷键已被系统或其他程序占用，请换一个')
+    }
+    setSetting(SHORTCUT_SETTINGS[kind], clean)
+    return shortcutInfo()
+  })
+  ipcMain.handle('shortcuts:reset', (_event, kind: ShortcutKind) => {
+    if (!(kind in SHORTCUT_DEFAULTS)) throw new Error('未知快捷键')
+    if (!registerShortcut(kind, SHORTCUT_DEFAULTS[kind])) {
+      throw new Error('默认快捷键被占用，请手动设置一个')
+    }
+    setSetting(SHORTCUT_SETTINGS[kind], SHORTCUT_DEFAULTS[kind])
+    return shortcutInfo()
+  })
   ipcMain.handle('capture:copyImage', async (_event, dataUrl: string) => {
     if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png;base64,')) {
       throw new Error('图片数据无效')
@@ -701,18 +817,6 @@ if (ownsInstance) app.whenReady().then(() => {
     if (typeof text !== 'string') throw new Error('文字内容无效')
     await clipboard.writeText(text)
     return true
-  })
-  ipcMain.handle('shortcuts:setOcr', (_event, accelerator: string) => {
-    if (typeof accelerator !== 'string' || !accelerator.trim()) throw new Error('快捷键不能为空')
-    const clean = accelerator.trim()
-    if (!/^[A-Za-z0-9+_-]{3,64}$/.test(clean)) throw new Error('快捷键格式无效')
-    const previous = activeOcrShortcut
-    if (!registerOcrShortcut(clean)) {
-      registerOcrShortcut(previous)
-      throw new Error('这个快捷键已被系统或其他程序占用，请换一个')
-    }
-    setSetting('ocr_shortcut', clean)
-    return clean
   })
   installApplicationMenu()
   if (process.platform === 'darwin') {
@@ -735,21 +839,13 @@ if (ownsInstance) app.whenReady().then(() => {
   }, () => { notifyTaskWindows(); updateTaskbarBadge() })
   createTray()
   setTimeout(updateTaskbarBadge, 1200)
-  registerShortcuts()
-  const preferredOcr = getSetting('ocr_shortcut') ?? DEFAULT_OCR_SHORTCUT
-  if (!registerOcrShortcut(preferredOcr)) {
-    // 默认键被占用时自动退到更少冲突的组合，并把实际生效值写回设置。
-    for (const fallback of [
-      'CommandOrControl+Alt+Shift+O',
-      'CommandOrControl+Shift+Alt+S',
-      'CommandOrControl+Alt+P'
-    ]) {
-      if (registerOcrShortcut(fallback)) {
-        setSetting('ocr_shortcut', fallback)
-        break
-      }
-    }
+  if (migration.migrated) {
+    setTimeout(
+      () => sendToRendererWhenReady('ui:data-migrated', { from: migration.from, tasks: migration.tasks }),
+      2500
+    )
   }
+  registerAllShortcuts()
   setupIntegration()
   startReminderLoop()
   // 备份放到窗口显示之后，不阻塞冷启动
@@ -788,6 +884,7 @@ app.on('before-quit', () => {
   // 桌宠暂停：stopPet()
   stopIsland()
   globalShortcut.unregisterAll()
+  void closeOcrEngine()
   backupNow('exit')
   closeDb()
 })

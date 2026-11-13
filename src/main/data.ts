@@ -156,6 +156,78 @@ export function registerDataIpc(): void {
       }
     }
   })
+  ipcMain.handle('data:restoreFromFile', async () => {
+    const picked = await dialog.showOpenDialog({
+      title: '选择旧版轻单数据库',
+      properties: ['openFile'],
+      filters: [
+        { name: '轻单数据库', extensions: ['db'] },
+        { name: '所有文件', extensions: ['*'] }
+      ]
+    })
+    if (picked.canceled || !picked.filePaths[0]) return { ok: false, message: '已取消' }
+    const src = picked.filePaths[0]
+    const dataDir = getDataDir()
+    const tmp = join(dataDir, 'lighttodo.db.import-tmp')
+    let closed = false
+    let swap: DatabaseSwap | null = null
+    try {
+      const sourceCheck = validateDatabaseFile(src)
+      if (!sourceCheck.ok) return { ok: false, message: sourceCheck.message }
+      copyFileSync(src, tmp)
+      const stagedCheck = validateDatabaseFile(tmp)
+      if (!stagedCheck.ok) return { ok: false, message: stagedCheck.message }
+      const preRestore = backupNow('pre-import')
+      if (!preRestore) return { ok: false, message: '无法创建恢复前备份，已取消恢复' }
+
+      const dest = join(dataDir, 'lighttodo.db')
+      closeDb()
+      closed = true
+      removeDatabaseSidecars(dest)
+      swap = swapDatabaseFile(tmp, dest)
+      initDb(dataDir)
+      closed = false
+      swap.commit()
+      swap = null
+
+      const launcher = join(process.execPath, '..', 'LightTodo.exe')
+      if (process.platform === 'darwin') app.relaunch()
+      else {
+        app.relaunch(
+          app.isPackaged
+            ? { execPath: existsSync(launcher) ? launcher : process.execPath }
+            : { execPath: process.execPath, args: process.argv.slice(1) }
+        )
+      }
+      app.exit(0)
+      return { ok: true }
+    } catch (error) {
+      if (swap) {
+        try {
+          closeDb()
+          swap.rollback()
+          initDb(dataDir)
+          closed = false
+        } catch {
+          /* reported below */
+        }
+      } else if (closed) {
+        try {
+          initDb(dataDir)
+          closed = false
+        } catch {
+          /* ignore */
+        }
+      }
+      return { ok: false, message: `恢复失败：${error instanceof Error ? error.message : String(error)}` }
+    } finally {
+      try {
+        if (existsSync(tmp)) unlinkSync(tmp)
+      } catch {
+        /* best effort */
+      }
+    }
+  })
   ipcMain.handle('data:exportJson', async () => {
     const { canceled, filePath } = await dialog.showSaveDialog({
       title: '导出 JSON',

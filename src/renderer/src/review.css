@@ -519,3 +519,19 @@
     font-size: 9px;
   }
 }
+
+/* 周复盘 · 周报 */
+.review-report-panel { margin-bottom: 16px; }
+.review-report-text {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 9px;
+  background: var(--hover);
+  color: var(--text);
+  font: 12.5px/1.9 var(--font);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow: auto;
+}
+.review-report-panel .review-panel-head { margin-bottom: 10px; }

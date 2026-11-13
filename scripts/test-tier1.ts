@@ -119,8 +119,9 @@ assert.ok(listTasks({ view: 'filter', filterId: saved.id }).some((task) => task.
 const overtime = createTask({ title: '上周没做完的', scheduledDate: yesterday, priority: 2 })
 assert.ok(listOverdueTasks(now).some((task) => task.id === overtime.id))
 const moved = replanTask(overtime.id, 'today')
-assert.equal(moved?.scheduledDate, today)
-assert.equal(countReplanActions(today), 1)
+const actualToday = format(new Date(), 'yyyy-MM-dd')
+assert.equal(moved?.scheduledDate, actualToday)
+assert.equal(countReplanActions(actualToday), 1)
 
 const timed = createTask({ title: '计时任务', scheduledDate: today })
 addTimeEntry(timed.id, now.toISOString(), new Date(now.getTime() + 35 * 60000).toISOString())

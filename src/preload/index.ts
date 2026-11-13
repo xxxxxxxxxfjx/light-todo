@@ -9,6 +9,8 @@ import type {
   List,
   ListSection,
   SavedFilter,
+  ShortcutInfo,
+  ShortcutKind,
   Task,
   UpdateTaskInput,
   ViewKey,
@@ -158,10 +160,10 @@ const api = {
     query: (q: string) => ipcRenderer.invoke('search:query', q)
   },
   shortcuts: {
-    ocr: (): Promise<string> => ipcRenderer.invoke('shortcuts:ocr'),
-    setOcr: (accelerator: string): Promise<string> => ipcRenderer.invoke('shortcuts:setOcr', accelerator),
-    status: (): Promise<{ accelerator: string; registered: boolean }> =>
-      ipcRenderer.invoke('shortcuts:ocrStatus')
+    list: (): Promise<ShortcutInfo[]> => ipcRenderer.invoke('shortcuts:list'),
+    set: (kind: ShortcutKind, accelerator: string): Promise<ShortcutInfo[]> =>
+      ipcRenderer.invoke('shortcuts:set', kind, accelerator),
+    reset: (kind: ShortcutKind): Promise<ShortcutInfo[]> => ipcRenderer.invoke('shortcuts:reset', kind)
   },
   settings: {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),
@@ -178,6 +180,8 @@ const api = {
     import: () => ipcRenderer.invoke('data:import'),
     clearCompleted: () => ipcRenderer.invoke('data:clearCompleted'),
     restoreBackup: (name: string) => ipcRenderer.invoke('data:restoreBackup', name),
+    restoreFromFile: (): Promise<{ ok: boolean; message?: string }> =>
+      ipcRenderer.invoke('data:restoreFromFile'),
     getLoginItem: () => ipcRenderer.invoke('app:getLoginItem'),
     setLoginItem: (enabled: boolean) => ipcRenderer.invoke('app:setLoginItem', enabled)
   },
@@ -207,6 +211,13 @@ const api = {
     ipcRenderer.on('ui:capture-result', listener)
     return (): void => {
       ipcRenderer.removeListener('ui:capture-result', listener)
+    }
+  },
+  onDataMigrated: (cb: (info: { from: string; tasks: number }) => void) => {
+    const listener = (_e: unknown, info: { from: string; tasks: number }): void => cb(info)
+    ipcRenderer.on('ui:data-migrated', listener)
+    return (): void => {
+      ipcRenderer.removeListener('ui:data-migrated', listener)
     }
   },
   capture: {

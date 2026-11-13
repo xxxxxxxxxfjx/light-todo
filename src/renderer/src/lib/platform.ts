@@ -8,5 +8,5 @@ export function modKey(key: string, shift = false): string {
   return isMac ? `${mod}${shift ? '⇧' : ''}${key}` : `Ctrl+${shift ? 'Shift+' : ''}${key}`
 }
 
-/** 全局捕获快捷键：Windows Ctrl+Shift+Space，macOS ⌘⇧Space。 */
-export const globalCaptureLabel = isMac ? '⌘⇧Space' : 'Ctrl+Shift+Space'
+/** 全局捕获快捷键：Windows Ctrl+Alt+Space，macOS ⌘⌥Space。 */
+export const globalCaptureLabel = isMac ? '⌘⌥Space' : 'Ctrl+Alt+Space'

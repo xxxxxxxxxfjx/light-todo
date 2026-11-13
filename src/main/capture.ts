@@ -88,8 +88,11 @@ export async function captureScreenRegion(): Promise<Buffer | null> {
     thumbnailSize,
     fetchWindowIcons: false
   })
+  const displayIndex = screen.getAllDisplays().findIndex((item) => item.id === display.id)
   const source =
-    sources.find((item) => item.display_id === String(display.id)) ?? sources[0]
+    sources.find((item) => item.display_id === String(display.id)) ??
+    (displayIndex >= 0 ? sources[displayIndex] : undefined) ??
+    sources[0]
   if (!source) throw new Error('无法捕获屏幕')
   const full = source.thumbnail
   if (full.isEmpty()) throw new Error('屏幕捕获为空')
@@ -151,12 +154,18 @@ export async function captureScreenRegion(): Promise<Buffer | null> {
       new Promise<SelectionRect | null>((resolve) => setTimeout(() => resolve(null), 120_000))
     ])
     if (!rect) return null
-    const crop = full.crop({
-      x: Math.round(rect.x * scale),
-      y: Math.round(rect.y * scale),
-      width: Math.max(1, Math.round(rect.width * scale)),
-      height: Math.max(1, Math.round(rect.height * scale))
-    })
+    // desktopCapturer may return a thumbnail that is not exactly
+    // display.size * scaleFactor (Windows DPI / virtual-screen quirks).
+    // Map selection coordinates by the ACTUAL bitmap-to-display ratio so the
+    // cropped image always matches what the user dragged.
+    const fullSize = full.getSize()
+    const scaleX = display.bounds.width > 0 ? fullSize.width / display.bounds.width : scale
+    const scaleY = display.bounds.height > 0 ? fullSize.height / display.bounds.height : scale
+    const x = Math.max(0, Math.min(fullSize.width - 1, Math.round(rect.x * scaleX)))
+    const y = Math.max(0, Math.min(fullSize.height - 1, Math.round(rect.y * scaleY)))
+    const width = Math.max(1, Math.min(fullSize.width - x, Math.round(rect.width * scaleX)))
+    const height = Math.max(1, Math.min(fullSize.height - y, Math.round(rect.height * scaleY)))
+    const crop = full.crop({ x, y, width, height })
     return crop.toPNG()
   } finally {
     if (!overlay.isDestroyed()) overlay.destroy()

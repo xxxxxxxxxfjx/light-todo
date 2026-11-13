@@ -521,7 +521,7 @@ function Overview(): React.JSX.Element {
           <div className="ov-tip-title">快速上手</div>
           <ul>
             <li>
-              <kbd>{mod}</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> 全局记一条
+              <kbd>{mod}</kbd> + <kbd>Alt</kbd> + <kbd>Space</kbd> 全局记一条
             </li>
             <li>
               输入 <code>明天下午3点 交周报 #工作 @汇报 !高</code>

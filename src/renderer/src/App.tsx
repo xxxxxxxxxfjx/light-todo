@@ -92,6 +92,9 @@ export default function App(): React.JSX.Element {
     // 托盘 / 全局快捷键 / lighttodo://add 都是“捕获”：默认进收件箱。
     const offQuick = window.api.onQuickAdd((text) => openQuickAdd(text ?? '', undefined, true))
     const offCapture = window.api.onCaptureResult((result) => setCapture(result))
+    const offMigrated = window.api.onDataMigrated((info) => {
+      showToast(`已从旧数据目录恢复 ${info.tasks} 条任务`)
+    })
     const offOpen = window.api.onOpenTask((id) => selectTaskById(id))
     const offSettings = window.api.onSettings(() => useStore.getState().openSettings())
     const offTasks = window.api.onTasksChanged(() => {
@@ -107,6 +110,7 @@ export default function App(): React.JSX.Element {
     return () => {
       offQuick()
       offCapture()
+      offMigrated()
       offOpen()
       offSettings()
       offTasks()

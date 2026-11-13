@@ -20,6 +20,7 @@ import { globalCaptureLabel, modKey } from '../lib/platform'
 import { DEFAULT_PET_SETTINGS, type PetSettings } from '@shared/pet'
 import { DEFAULT_ISLAND_SETTINGS, ISLAND_ACCENTS, type IslandAccent, type IslandSettings } from '@shared/island'
 import { Mascot } from '../pet/Mascot'
+import type { ShortcutInfo, ShortcutKind } from '@shared/types'
 
 interface Backup {
   name: string
@@ -96,8 +97,8 @@ export function SettingsModal(): React.JSX.Element {
   const [shutdownTime, setShutdownTime] = useState('17:30')
   const [shutdownEnabled, setShutdownEnabled] = useState(true)
   const [replanEnabled, setReplanEnabled] = useState(true)
-  const [ocrShortcut, setOcrShortcut] = useState('CommandOrControl+Alt+O')
-  const [recordingShortcut, setRecordingShortcut] = useState(false)
+  const [shortcuts, setShortcuts] = useState<ShortcutInfo[]>([])
+  const [recordingKind, setRecordingKind] = useState<ShortcutKind | null>(null)
 
   const changeIsland = async (patch: Partial<IslandSettings>): Promise<void> => {
     setIslandSaving(true)
@@ -166,7 +167,7 @@ export function SettingsModal(): React.JSX.Element {
     window.api.settings.get('shutdown_time').then((v) => v && setShutdownTime(v))
     window.api.settings.get('shutdown_enabled').then((v) => setShutdownEnabled(v !== '0'))
     window.api.settings.get('replan_enabled').then((v) => setReplanEnabled(v !== '0'))
-    window.api.shortcuts.ocr().then(setOcrShortcut).catch(() => undefined)
+    window.api.shortcuts.list().then(setShortcuts).catch(() => undefined)
     loadBackups()
     window.api.pet.settings().then(value => { setPet(value); setPetReady(true) }).catch(() => setPetReady(false))
     window.api.island.settings().then(setIsland).catch(() => {})
@@ -263,7 +264,7 @@ export function SettingsModal(): React.JSX.Element {
         </div>
 
         <nav className="settings-tabs" aria-label="设置分类">
-          {[['island', '任务岛'], ['appearance', '外观与启动'], ['rhythm', '节奏'], ['tags', '标签管理'], ['data', '数据与备份'], ['about', '关于']].map(([key, name]) => <button key={key} aria-current={section === key ? 'page' : undefined} className={section === key ? 'active' : ''} onClick={() => setSection(key)}>{name}</button>)}
+          {[['island', '任务岛'], ['appearance', '外观与启动'], ['rhythm', '节奏'], ['shortcuts', '快捷键'], ['tags', '标签管理'], ['data', '数据与备份'], ['about', '关于']].map(([key, name]) => <button key={key} aria-current={section === key ? 'page' : undefined} className={section === key ? 'active' : ''} onClick={() => setSection(key)}>{name}</button>)}
         </nav>
         <div className="settings-body">
           <section className="set-section island-settings" hidden={section !== 'island'}>
@@ -399,47 +400,6 @@ export function SettingsModal(): React.JSX.Element {
                 }}
               />
             </div>
-            <div className="set-row">
-              <span className="set-label">截图识别</span>
-              <button
-                className={`shortcut-recorder ${recordingShortcut ? 'recording' : ''}`}
-                onClick={() => setRecordingShortcut(true)}
-                onBlur={() => setRecordingShortcut(false)}
-                onKeyDown={(event) => {
-                  if (!recordingShortcut) return
-                  event.preventDefault()
-                  event.stopPropagation()
-                  if (event.key === 'Escape') {
-                    setRecordingShortcut(false)
-                    return
-                  }
-                  if (['Control', 'Alt', 'Shift', 'Meta'].includes(event.key)) return
-                  const parts: string[] = []
-                  if (event.ctrlKey || event.metaKey) parts.push('CommandOrControl')
-                  if (event.altKey) parts.push('Alt')
-                  if (event.shiftKey) parts.push('Shift')
-                  let key = event.key
-                  if (key === ' ') key = 'Space'
-                  else if (key.startsWith('Arrow')) key = key.replace('Arrow', '')
-                  else if (key.length === 1) key = key.toUpperCase()
-                  parts.push(key)
-                  const accelerator = parts.join('+')
-                  setRecordingShortcut(false)
-                  window.api.shortcuts
-                    .setOcr(accelerator)
-                    .then((value) => {
-                      setOcrShortcut(value)
-                      showToast('截图快捷键已更新')
-                    })
-                    .catch((error) => showToast(readableError(error)))
-                }}
-              >
-                {recordingShortcut
-                  ? '按下组合键…'
-                  : ocrShortcut.replace(/CommandOrControl/g, 'Ctrl').replace(/\+/g, ' + ')}
-              </button>
-              <span className="set-hint">框选屏幕 → OCR → 自动解析日期与时间段；默认 Ctrl + Alt + O，避开微信 Alt+A 与系统 Win+Shift+S</span>
-            </div>
             <label className="set-row clickable">
               <span className="set-label">启动时清理逾期</span>
               <input
@@ -453,6 +413,72 @@ export function SettingsModal(): React.JSX.Element {
               />
               <span className="set-hint">每天第一次打开时，逐条决定逾期任务去向</span>
             </label>
+          </section>
+
+          <section className="set-section" hidden={section !== 'shortcuts'}>
+            <div className="set-title">全局快捷键</div>
+            <p className="set-hint shortcut-intro">
+              点击右侧按键后直接按新的组合键；被系统或其他程序占用会提示。默认：快速添加 Ctrl+Alt+Space、剪贴板 Ctrl+Alt+C、截图 Ctrl+Alt+Shift+O，避开微信 Alt+A 与系统 Win+Shift+S。
+            </p>
+            {shortcuts.map((item) => (
+              <div className="set-row shortcut-row" key={item.kind}>
+                <span className="set-label">{item.label}</span>
+                <button
+                  className={`shortcut-recorder ${recordingKind === item.kind ? 'recording' : ''}`}
+                  onClick={() => setRecordingKind(item.kind)}
+                  onBlur={() => setRecordingKind(null)}
+                  onKeyDown={(event) => {
+                    if (recordingKind !== item.kind) return
+                    event.preventDefault()
+                    event.stopPropagation()
+                    if (event.key === 'Escape') {
+                      setRecordingKind(null)
+                      return
+                    }
+                    if (['Control', 'Alt', 'Shift', 'Meta'].includes(event.key)) return
+                    const parts: string[] = []
+                    if (event.ctrlKey || event.metaKey) parts.push('CommandOrControl')
+                    if (event.altKey) parts.push('Alt')
+                    if (event.shiftKey) parts.push('Shift')
+                    let key = event.key
+                    if (key === ' ') key = 'Space'
+                    else if (key.startsWith('Arrow')) key = key.replace('Arrow', '')
+                    else if (key.length === 1) key = key.toUpperCase()
+                    parts.push(key)
+                    setRecordingKind(null)
+                    window.api.shortcuts
+                      .set(item.kind, parts.join('+'))
+                      .then((next) => {
+                        setShortcuts(next)
+                        showToast(`${item.label}快捷键已更新`)
+                      })
+                      .catch((error) => showToast(readableError(error)))
+                  }}
+                >
+                  {recordingKind === item.kind
+                    ? '按下组合键…'
+                    : item.accelerator.replace(/CommandOrControl/g, 'Ctrl').replace(/\+/g, ' + ')}
+                </button>
+                <button
+                  className="mini-btn"
+                  onClick={() => {
+                    window.api.shortcuts
+                      .reset(item.kind)
+                      .then((next) => {
+                        setShortcuts(next)
+                        showToast('已恢复默认快捷键')
+                      })
+                      .catch((error) => showToast(readableError(error)))
+                  }}
+                >
+                  默认
+                </button>
+                <span className="set-hint">
+                  {item.hint}
+                  {!item.registered ? ' · 当前未生效' : ''}
+                </span>
+              </div>
+            ))}
           </section>
 
           <section className="set-section" hidden={section !== 'tags'}>
@@ -533,6 +559,24 @@ export function SettingsModal(): React.JSX.Element {
               <button className="mini-btn" onClick={() => window.api.app.openDataDir()}>
                 <FolderOpen size={12} /> 打开
               </button>
+            </div>
+            <div className="set-row">
+              <span className="set-label">旧数据</span>
+              <button
+                className="mini-btn"
+                onClick={async () => {
+                  if (!window.confirm('从旧版数据库恢复会覆盖当前数据（会先自动备份当前库），继续？')) return
+                  const result = await window.api.data.restoreFromFile()
+                  if (!result.ok && result.message !== '已取消') {
+                    showToast(`恢复失败：${result.message ?? '未知错误'}`)
+                  }
+                }}
+              >
+                <FolderOpen size={12} /> 选择旧 lighttodo.db
+              </button>
+              <span className="set-hint">
+                升级后找不到任务时，选旧版 LightTodoData/lighttodo.db；会自动备份当前库再重启
+              </span>
             </div>
             <div className="set-row">
               <span className="set-label">导出</span>
