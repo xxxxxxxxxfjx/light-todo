@@ -28,12 +28,16 @@
 
 ## 4. 旧版本数据自动恢复
 
-升级后如果当前数据目录为空，启动时会自动查找：
+升级后如果当前数据目录为空，启动时会自动查找（安装版和便携版都会）：
 
 - `%APPDATA%/LightTodo/lighttodo.db`、`%APPDATA%/lighttodo/...`
 - 便携版 exe 同级的 `LightTodoData/lighttodo.db`
+- `%LOCALAPPDATA%/LightTodo`、`%LOCALAPPDATA%/Programs/LightTodo`
 - 新旧版本目录的兄弟文件夹（如 `release/0.6.14` 找 `release/0.6.13/LightTodoData`）
 - `%APPDATA%` 下其他一级目录里的 `lighttodo.db`
+- `Downloads`、`Desktop`、`Documents`、`OneDrive/Desktop`、`OneDrive/Documents` 下的 `LightTodoData/lighttodo.db`
+
+如果旧数据在移动硬盘、U 盘或其他自定义目录，用「设置 → 数据与备份 → 选择旧 lighttodo.db」手动选择。
 
 找到最新、可读、且有任务的旧库后，自动复制到当前数据目录，并在界面提示「已从旧数据目录恢复 N 条任务」。
 

@@ -13,7 +13,7 @@ import {
   clipboard,
   ClipboardItem
 } from 'electron'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { release } from 'node:os'
 import { initDb, closeDb, getDueReminders, getSetting, setSetting, markReminderSent, purgeTrash, setTaskStatus, snoozeReminder } from './db'
@@ -760,11 +760,13 @@ if (ownsInstance) app.whenReady().then(() => {
   app.setAppUserModelId('com.lighttodo.app')
   const dataDir = resolveDataDir()
   const migration =
-    app.isPackaged && process.env.PORTABLE_EXECUTABLE_DIR
+    app.isPackaged && (portableRoot || dataDir === app.getPath('userData'))
       ? migrateLegacyDatabase({
           currentDir: dataDir,
           appDataDir: app.getPath('appData'),
-          executableDir: process.env.PORTABLE_EXECUTABLE_DIR
+          executableDir: process.env.PORTABLE_EXECUTABLE_DIR ?? dirname(process.execPath),
+          homeDir: app.getPath('home'),
+          localAppDataDir: process.env.LOCALAPPDATA ?? null
         })
       : { migrated: false }
   if (migration.migrated) {

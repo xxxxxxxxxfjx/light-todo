@@ -38,37 +38,59 @@ function addCandidate(dirs: Set<string>, dir: string | null | undefined): void {
   if (dir) dirs.add(dir)
 }
 
-function candidateDirectories(
-  currentDir: string,
-  appDataDir: string,
+export interface MigrationSearch {
+  currentDir: string
+  appDataDir: string
   executableDir: string | null
-): string[] {
-  const dirs = new Set<string>()
-  addCandidate(dirs, join(appDataDir, 'LightTodo'))
-  addCandidate(dirs, join(appDataDir, 'lighttodo'))
-  addCandidate(dirs, join(appDataDir, 'Electron'))
-  addCandidate(dirs, dirname(currentDir))
-  addCandidate(dirs, join(dirname(currentDir), 'LightTodoData'))
+  homeDir?: string | null
+  localAppDataDir?: string | null
+}
 
-  if (executableDir) {
-    addCandidate(dirs, join(executableDir, 'LightTodoData'))
-    const parent = dirname(executableDir)
-    addCandidate(dirs, join(parent, 'LightTodoData'))
-    // Portable builds unpack next to the exe; a new version usually lives in a
-    // sibling folder (release/0.6.11 vs release/0.6.10). Scan one level.
-    try {
-      for (const entry of readdirSync(parent, { withFileTypes: true })) {
-        if (entry.isDirectory()) addCandidate(dirs, join(parent, entry.name, 'LightTodoData'))
-      }
-    } catch {
-      /* best effort */
+function addPortableRoot(dirs: Set<string>, root: string | null | undefined): void {
+  if (!root) return
+  addCandidate(dirs, join(root, 'LightTodoData'))
+  addCandidate(dirs, root)
+  try {
+    for (const entry of readdirSync(root, { withFileTypes: true }).slice(0, 80)) {
+      if (!entry.isDirectory()) continue
+      addCandidate(dirs, join(root, entry.name, 'LightTodoData'))
+    }
+  } catch {
+    /* best effort */
+  }
+}
+
+function candidateDirectories(opts: MigrationSearch): string[] {
+  const dirs = new Set<string>()
+  addCandidate(dirs, join(opts.appDataDir, 'LightTodo'))
+  addCandidate(dirs, join(opts.appDataDir, 'lighttodo'))
+  addCandidate(dirs, join(opts.appDataDir, 'Electron'))
+  addCandidate(dirs, dirname(opts.currentDir))
+  addCandidate(dirs, join(dirname(opts.currentDir), 'LightTodoData'))
+
+  if (opts.localAppDataDir) {
+    addCandidate(dirs, join(opts.localAppDataDir, 'LightTodo'))
+    addCandidate(dirs, join(opts.localAppDataDir, 'lighttodo'))
+    addCandidate(dirs, join(opts.localAppDataDir, 'Programs', 'LightTodo'))
+    addCandidate(dirs, join(opts.localAppDataDir, 'Programs', 'lighttodo'))
+  }
+
+  if (opts.executableDir) {
+    addPortableRoot(dirs, opts.executableDir)
+    addPortableRoot(dirs, dirname(opts.executableDir))
+  }
+
+  // Common places a user may have kept the portable folder before installing.
+  if (opts.homeDir) {
+    for (const name of ['Downloads', 'Desktop', 'Documents', 'OneDrive/Desktop', 'OneDrive/Documents']) {
+      addPortableRoot(dirs, join(opts.homeDir, name))
     }
   }
 
   // Any first-level folder under %APPDATA% that still carries a lighttodo.db.
   try {
-    for (const entry of readdirSync(appDataDir, { withFileTypes: true }).slice(0, 200)) {
-      if (entry.isDirectory()) addCandidate(dirs, join(appDataDir, entry.name))
+    for (const entry of readdirSync(opts.appDataDir, { withFileTypes: true }).slice(0, 200)) {
+      if (entry.isDirectory()) addCandidate(dirs, join(opts.appDataDir, entry.name))
     }
   } catch {
     /* best effort */
@@ -76,17 +98,15 @@ function candidateDirectories(
   return [...dirs]
 }
 
-/** Find the newest non-empty 轻单 database outside the current data directory. */
-export function findLegacyDatabase(
-  currentDir: string,
-  appDataDir: string,
-  executableDir: string | null
-): LegacyCandidate | null {
-  const currentPath = join(currentDir, 'lighttodo.db')
+/** Find every non-empty 轻单 database outside the current data directory. */
+export function findLegacyDatabases(opts: MigrationSearch): LegacyCandidate[] {
+  const currentPath = join(opts.currentDir, 'lighttodo.db')
   const found: LegacyCandidate[] = []
-  for (const dir of candidateDirectories(currentDir, appDataDir, executableDir)) {
+  const seen = new Set<string>()
+  for (const dir of candidateDirectories(opts)) {
     const path = join(dir, 'lighttodo.db')
-    if (path === currentPath || !existsSync(path)) continue
+    if (path === currentPath || seen.has(path) || !existsSync(path)) continue
+    seen.add(path)
     if (!validateDatabaseFile(path).ok) continue
     const tasks = countTasks(path)
     if (tasks <= 0) continue
@@ -97,23 +117,24 @@ export function findLegacyDatabase(
     }
   }
   found.sort((a, b) => b.mtime - a.mtime)
-  return found[0] ?? null
+  return found
+}
+
+/** Find the newest non-empty 轻单 database outside the current data directory. */
+export function findLegacyDatabase(opts: MigrationSearch): LegacyCandidate | null {
+  return findLegacyDatabases(opts)[0] ?? null
 }
 
 /**
  * If the current database is missing/empty, copy the newest legacy database in.
  * The old file is left untouched; the current one (if any) is renamed aside.
  */
-export function migrateLegacyDatabase(opts: {
-  currentDir: string
-  appDataDir: string
-  executableDir: string | null
-}): MigrationResult {
+export function migrateLegacyDatabase(opts: MigrationSearch): MigrationResult {
   const currentPath = join(opts.currentDir, 'lighttodo.db')
   const currentTasks = existsSync(currentPath) ? countTasks(currentPath) : 0
   if (currentTasks > 0) return { migrated: false }
 
-  const legacy = findLegacyDatabase(opts.currentDir, opts.appDataDir, opts.executableDir)
+  const legacy = findLegacyDatabase(opts)
   if (!legacy) return { migrated: false }
 
   mkdirSync(opts.currentDir, { recursive: true })
