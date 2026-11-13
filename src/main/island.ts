@@ -188,13 +188,22 @@ function startHitTracking(): void {
 
 function place(): void {
   if (!island) return
-  const display = screen.getPrimaryDisplay()
-  const area = display.workArea
-  const saved = Number(getSetting('island_x') ?? 'NaN')
+  const savedX = Number(getSetting('island_x') ?? 'NaN')
+  // 保存过的位置属于哪块屏，就把岛放回那块屏；没保存过则用主屏。
+  const displays = screen.getAllDisplays()
+  // 找 x 最接近的那块屏（允许拖到两屏之间的缝隙或略微出界）。
+  const target =
+    (Number.isFinite(savedX)
+      ? displays.reduce((best, item) => {
+          const center = item.bounds.x + item.bounds.width / 2
+          const bestCenter = best ? best.bounds.x + best.bounds.width / 2 : Number.POSITIVE_INFINITY
+          return Math.abs(savedX - center) < Math.abs(savedX - bestCenter) ? item : best
+        }, null as Electron.Display | null)
+      : null) ?? screen.getPrimaryDisplay()
+  const area = target.workArea
   const centered = area.x + (area.width - ISLAND_STAGE.width) / 2
-  const x = Number.isFinite(saved)
-    ? Math.max(area.x, Math.min(saved, area.x + area.width - ISLAND_STAGE.width))
-    : centered
+  // 不限制左右位置：只要贴在目标屏顶部，x 想放哪都行（含跨屏边界）。
+  const x = Number.isFinite(savedX) ? savedX : centered
   island.setBounds({
     x: Math.round(x),
     y: area.y,
@@ -338,7 +347,7 @@ export function registerIsland(showMain: (id?: string, settings?: boolean) => vo
     if (!['rest', 'peek', 'panel'].includes(next)) return
     applyPhase(next)
   })
-  // 顶部拖动：只允许左右移动，纵向永远贴齐工作区顶部
+  // 顶部拖动：允许跨屏——x 跟随鼠标所在显示器，纵向始终吸附该屏工作区顶部
   ipcMain.on('island:drag', (e, stage: 'start' | 'move' | 'end', screenX: number) => {
     if (stopping || e.sender !== island?.webContents || !island) return
     if (stage === 'start') {
@@ -347,14 +356,18 @@ export function registerIsland(showMain: (id?: string, settings?: boolean) => vo
     }
     if (stage === 'move' && drag) {
       const bounds = island.getBounds()
-      const area = screen.getPrimaryDisplay().workArea
-      const x = Math.max(area.x, Math.min(drag.winX + screenX - drag.startX, area.x + area.width - bounds.width))
-      island.setBounds({ ...bounds, x: Math.round(x) })
+      // 光标在哪块屏，岛就贴到哪块屏的顶部；x 不做左右限制。
+      const cursor = screen.getCursorScreenPoint()
+      const target = screen.getDisplayNearestPoint(cursor) ?? screen.getPrimaryDisplay()
+      const area = target.workArea
+      const x = drag.winX + screenX - drag.startX
+      island.setBounds({ ...bounds, x: Math.round(x), y: area.y })
       return
     }
     if (stage === 'end') {
       drag = null
       setSetting('island_x', String(island.getBounds().x))
+      setSetting('island_y', String(island.getBounds().y))
     }
   })
   // 快速添加时要能接收键盘：临时把窗口变成可聚焦，收起后再还原
@@ -375,7 +388,7 @@ export function registerIsland(showMain: (id?: string, settings?: boolean) => vo
     Menu.buildFromTemplate([
       { label: '打开轻单', click: () => openMain() },
       { label: '隐藏任务岛', click: toggleIsland },
-      { label: '恢复顶部居中', click: () => { setSetting('island_x', 'NaN'); place() } },
+      { label: '恢复顶部居中', click: () => { setSetting('island_x', 'NaN'); setSetting('island_y', 'NaN'); place() } },
       { type: 'separator' },
       { label: '退出轻单', click: () => app.quit() }
     ]).popup({ window: island })

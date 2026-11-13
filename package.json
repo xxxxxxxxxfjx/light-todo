@@ -1,6 +1,6 @@
 {
   "name": "lighttodo",
-  "version": "0.6.15",
+  "version": "0.6.16",
   "private": true,
   "description": "轻单 LightTodo — Windows 上最快的中文待办",
   "main": "./out/main/index.js",
