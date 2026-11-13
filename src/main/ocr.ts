@@ -2,7 +2,7 @@ import { app, clipboard, nativeImage } from 'electron'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { createEngine, type OcrEngine } from '@arcships/light-ocr'
+import { createEngine, type OcrEngine } from '@arcships/light-ocr-medium'
 import { normalizeCaptureText } from '../shared/capture-parse.ts'
 
 function ocrScriptPath(): string {
@@ -18,7 +18,7 @@ export interface OcrResult {
   lines: string[]
 }
 
-/** PaddleOCR PP-OCRv6 Small is the primary engine (~30MB, higher accuracy than Tiny). */
+/** PaddleOCR PP-OCRv6 Medium is the primary engine (~139MB, highest accuracy tier). */
 let enginePromise: Promise<OcrEngine> | null = null
 
 function paddleEngine(): Promise<OcrEngine> {

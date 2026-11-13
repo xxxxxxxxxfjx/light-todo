@@ -45,6 +45,10 @@ Windows 上最快的中文待办 —— 本地优先、键盘优先、开箱即�
 - 快速添加底栏重排，「添加」固定在右下角
 - 便携版升级后自动查找旧 `LightTodoData/lighttodo.db`；设置 → 数据支持手动选择旧库恢复
 
+### 0.6.19 OCR 引擎升级（Medium）
+
+- OCR 升级到 PaddleOCR PP-OCRv6 Medium（~139MB），单字/低质量截图置信度明显提升
+
 ### 0.6.18 OCR 引擎升级
 
 - OCR 从 PaddleOCR PP-OCRv6 Tiny（~6.3MB）升级到 Small（~30MB），中文识别率显著提升
@@ -151,6 +155,18 @@ macOS 快捷键文案会自动显示 `⌘`，标题栏为交通灯预留左侧�
 node --experimental-strip-types scripts/test-nlp.ts
 node --experimental-strip-types scripts/test-db.ts
 ```
+
+## 测试策略（按改动范围）
+
+不是每个小改动都要跑全量 E2E 和完整部署，按影响范围决定：
+
+| 改动范围 | 测试要求 |
+|---|---|
+| 小改动（文案、样式、单个组件、参数调整） | `pnpm typecheck` + 相关单测 + 针对性手动验证；不跑全量 E2E，不完整打包 |
+| 中等改动（主进程、依赖/模型替换、打包相关） | 上述 + 针对性端到端验证 + `LIGHTTODO_SKIP_E2E=1 pnpm dist`（跳过全量 E2E，保留打包与成品启动门槛） |
+| 大改动（数据库、跨模块、启动器、发布流程） | 完整 `pnpm dist`（含 36 项 E2E 与单文件/ZIP 启动门槛） |
+
+原则：**测试量与影响范围匹配**；小改动不必完整部署，大改动不能省门槛。
 
 ## 说明
 

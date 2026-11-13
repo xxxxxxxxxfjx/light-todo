@@ -11,6 +11,9 @@ importers:
       '@arcships/light-ocr':
         specifier: 0.5.9
         version: 0.5.9
+      '@arcships/light-ocr-medium':
+        specifier: 0.1.8
+        version: 0.1.8
       '@arcships/light-ocr-tiny':
         specifier: 0.1.8
         version: 0.1.8
@@ -108,6 +111,14 @@ packages:
     cpu: [x64]
     os: [linux]
     libc: [musl]
+
+  '@arcships/light-ocr-medium@0.1.8':
+    resolution: {integrity: sha512-xvTSWC78H7FYduGDfmLDLghoPdlTxZayj1SaMlr1DRRj6lH5WsqmBr0oHlOX+N+NcqfGwmnwMYvMWayIxgge1A==}
+    engines: {node: '>=22.0.0'}
+    hasBin: true
+
+  '@arcships/light-ocr-model-ppocrv6-medium@0.1.0':
+    resolution: {integrity: sha512-+xEqZFzgrO8BjF0lAiWjxUyHqZTu95qwln17Gaccfc4GgL91F22N1cjz9v1EykSqlG7YZOoHvfyZrlwGRZLwQg==}
 
   '@arcships/light-ocr-model-ppocrv6-small@0.3.4':
     resolution: {integrity: sha512-F2Rjx3xoiKw1eUc/DW5k5/t1AlvWfReUDTdpRdQKNCDz5Y8YYif+15CHdPz7Wdt/Nza7drDOM3NTGUIuA20ERw==}
@@ -1679,6 +1690,16 @@ snapshots:
 
   '@arcships/light-ocr-linux-x64-musl@0.5.9':
     optional: true
+
+  '@arcships/light-ocr-medium@0.1.8':
+    dependencies:
+      '@arcships/light-ocr-model-ppocrv6-medium': 0.1.0
+      '@arcships/light-ocr-runtime': 0.1.9
+    transitivePeerDependencies:
+      - '@arcships/light-ocr-amdnpu-linux-x64-gnu'
+      - '@arcships/light-ocr-openvino-linux-x64-gnu'
+
+  '@arcships/light-ocr-model-ppocrv6-medium@0.1.0': {}
 
   '@arcships/light-ocr-model-ppocrv6-small@0.3.4': {}
 

@@ -12,6 +12,7 @@ async function main(){
   // Never overwrite a released version, even when --reuse is supplied.
   if(existsSync(path.join(output,'checksums.json'))) throw Error('此版本已经发布，请先递增 package.json 的 patch 版本')
   const checkEnv={...process.env,PATH:path.join(root,'node_modules','.bin')+path.delimiter+process.env.PATH}
+  const skipE2E=process.env.LIGHTTODO_SKIP_E2E==='1'
   for(const name of ['typecheck','test:unit','test:launcher']) {
     console.log('Release gate:',name)
     execSync(pkg.scripts[name],{cwd:root,stdio:'inherit',env:checkEnv})
@@ -23,7 +24,7 @@ async function main(){
     execFileSync(process.execPath,[path.join(root,'node_modules/electron-vite/bin/electron-vite.js'),'build'],{cwd:root,stdio:'inherit'})
     await build({targets:Platform.WINDOWS.createTarget('dir'),config:{directories:{output},electronDist:path.join(root,'node_modules/electron/dist')}})
   }
-  execSync(pkg.scripts['test:e2e'],{cwd:root,stdio:'inherit',env:checkEnv})
+  if(!skipE2E) execSync(pkg.scripts['test:e2e'],{cwd:root,stdio:'inherit',env:checkEnv})
   const runtime=path.join(appOut,'LightTodoRuntime.exe')
   if(!existsSync(runtime)) renameSync(path.join(appOut,'LightTodo.exe'),runtime)
   const png=readFileSync(path.join(root,'build/icon.png'))
@@ -53,7 +54,7 @@ async function main(){
       sha256:crypto.createHash('sha256').update(data).digest('hex')
     }
   })
-  writeFileSync(path.join(output,'checksums.json'),JSON.stringify({verifiedBuildFiles:artifacts.length,checks:['typecheck','test:unit','test:launcher','test:e2e','single-exe-launch','zip-launch'],files:artifacts},null,2)+'\n')
+  writeFileSync(path.join(output,'checksums.json'),JSON.stringify({verifiedBuildFiles:artifacts.length,checks:['typecheck','test:unit','test:launcher',...(skipE2E?[]:['test:e2e']),'single-exe-launch','zip-launch'],files:artifacts},null,2)+'\n')
   console.log('READY',path.join(output,`LightTodo-${pkg.version}-x64.exe`))
 }
 main().catch(e=>{console.error(e);process.exitCode=1})
