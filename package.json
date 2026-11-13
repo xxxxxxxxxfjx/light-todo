@@ -1,6 +1,6 @@
 {
   "name": "lighttodo",
-  "version": "0.6.19",
+  "version": "0.6.20",
   "private": true,
   "description": "杞诲崟 LightTodo 鈥?Windows 涓婃渶蹇殑涓枃寰呭姙",
   "main": "./out/main/index.js",
@@ -29,7 +29,6 @@
   },
   "dependencies": {
     "@arcships/light-ocr": "0.5.9",
-    "@arcships/light-ocr-medium": "0.1.8",
     "@arcships/light-ocr-tiny": "0.1.8",
     "@tanstack/react-virtual": "^3.14.25",
     "date-fns": "^4.4.0",
@@ -144,4 +143,3 @@
     }
   }
 }
-

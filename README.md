@@ -45,6 +45,10 @@ Windows 上最快的中文待办 —— 本地优先、键盘优先、开箱即�
 - 快速添加底栏重排，「添加」固定在右下角
 - 便携版升级后自动查找旧 `LightTodoData/lighttodo.db`；设置 → 数据支持手动选择旧库恢复
 
+### 0.6.20 OCR 回归 Small
+
+- OCR 回退到 PaddleOCR PP-OCRv6 Small（~30MB），移除 Medium 模型，安装包回到约 253MB
+
 ### 0.6.19 OCR 引擎升级（Medium）
 
 - OCR 升级到 PaddleOCR PP-OCRv6 Medium（~139MB），单字/低质量截图置信度明显提升
