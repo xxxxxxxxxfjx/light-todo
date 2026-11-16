@@ -1,0 +1,26 @@
+Global:
+  model_name: PP-OCRv5_mobile_det
+PostProcess:
+  box_thresh: 0.6
+  max_candidates: 3000
+  name: DBPostProcess
+  thresh: 0.3
+  unclip_ratio: 1.5
+PreProcess:
+  transform_ops:
+  - DecodeImage:
+      channel_first: false
+      img_mode: BGR
+  - DetResizeForTest: null
+  - NormalizeImage:
+      mean:
+      - 0.485
+      - 0.456
+      - 0.406
+      order: hwc
+      scale: 1./255.
+      std:
+      - 0.229
+      - 0.224
+      - 0.225
+  - ToCHWImage: null

@@ -1,0 +1,26 @@
+Global:
+  model_name: PP-OCRv5_mobile_rec
+PostProcess:
+  name: CTCLabelDecode
+PreProcess:
+  transform_ops:
+  - DecodeImage:
+      channel_first: false
+      img_mode: BGR
+  - RecResizeImg:
+      image_shape:
+      - 3
+      - 48
+      - 320
+  - NormalizeImage:
+      mean:
+      - 0.5
+      - 0.5
+      - 0.5
+      order: hwc
+      scale: 1./255.
+      std:
+      - 0.5
+      - 0.5
+      - 0.5
+  - ToCHWImage: null

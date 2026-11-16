@@ -45,6 +45,13 @@ Windows 上最快的中文待办 —— 本地优先、键盘优先、开箱即�
 - 快速添加底栏重排，「添加」固定在右下角
 - 便携版升级后自动查找旧 `LightTodoData/lighttodo.db`；设置 → 数据支持手动选择旧库恢复
 
+### 0.6.21 OCR 换成 OnnxOCR 模型
+
+- OCR 主引擎换成 [OnnxOCR](https://gitee.com/jingsongliujing/OnnxOCR) 的 PP-OCRv5 mobile 模型（det 4.8MB + rec 16.6MB，随包 `resources/ocr-model`），仍然本地 ONNX、离线、不需要 Python
+- 中文里的数字与单位不再被插入空格（`90分钟`、`10:00-11:30`），`parseCaptureText` 的时间/估时解析更稳
+- 移除 `@arcships/light-ocr` 模型包，直接用它家的 runtime 加载自备模型包，安装包体积下降
+- 新增 `scripts/test-ocr.ts`：校验模型包 SHA256SUMS、字典自洽，并做一次真实中文截图识别回归
+
 ### 0.6.20 OCR 回归 Small
 
 - OCR 回退到 PaddleOCR PP-OCRv6 Small（~30MB），移除 Medium 模型，安装包回到约 253MB

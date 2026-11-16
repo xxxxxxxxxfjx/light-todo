@@ -2,7 +2,7 @@ import { app, clipboard, nativeImage } from 'electron'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { createEngine, type OcrEngine } from '@arcships/light-ocr'
+import { createEngine, type OcrEngine } from '@arcships/light-ocr-runtime'
 import { normalizeCaptureText } from '../shared/capture-parse.ts'
 
 function ocrScriptPath(): string {
@@ -13,17 +13,40 @@ function ocrScriptPath(): string {
   return candidates.find((candidate) => existsSync(candidate)) ?? ''
 }
 
+/**
+ * OnnxOCR (PaddleOCR PP-OCRv5 mobile det + rec, ~21MB) ships as the
+ * `ocr-model` extra resource. The bundle keeps light-ocr's on-disk
+ * envelope so the native runtime can load it without a model package.
+ */
+function modelBundlePath(): string {
+  const candidates = [
+    join(process.resourcesPath, 'ocr-model'),
+    join(app.getAppPath(), 'build', 'ocr-model')
+  ]
+  return (
+    candidates.find((candidate) => existsSync(join(candidate, 'manifest.json'))) ?? ''
+  )
+}
+
 export interface OcrResult {
   text: string
   lines: string[]
 }
 
-/** PaddleOCR PP-OCRv6 Small is the primary engine (~30MB, stable balance of size and accuracy). */
 let enginePromise: Promise<OcrEngine> | null = null
 
-function paddleEngine(): Promise<OcrEngine> {
+function onnxEngine(): Promise<OcrEngine> {
   if (!enginePromise) {
+    const bundlePath = modelBundlePath()
+    if (!bundlePath) {
+      enginePromise = Promise.reject(new Error('OCR 模型缺失，请重新安装完整程序'))
+      enginePromise.catch(() => {
+        enginePromise = null
+      })
+      return enginePromise
+    }
     enginePromise = createEngine({
+      bundlePath,
       recognitionScoreThreshold: 0.1,
       recognitionBatchSize: 8
     }).catch((error) => {
@@ -56,9 +79,9 @@ function upscaleForOcr(buffer: Buffer, targetLongest: number): Buffer {
   return buffer
 }
 
-/** 用 tiny 引擎识别，空结果时返回 null（不抛错）。 */
-async function tryPaddle(png: Buffer): Promise<OcrResult | null> {
-  const engine = await paddleEngine()
+/** 用本地 OCR 引擎识别，空结果时返回 null（不抛错）。 */
+async function tryOnnx(png: Buffer): Promise<OcrResult | null> {
+  const engine = await onnxEngine()
   const result = await engine.recognizeEncoded(png)
   const lines = result.lines.map((line) => line.text.trim()).filter(Boolean)
   const text = normalizeCaptureText(lines.join('\n'))
@@ -67,7 +90,7 @@ async function tryPaddle(png: Buffer): Promise<OcrResult | null> {
 }
 
 /**
- * Windows built-in OCR fallback, used only when the Paddle runtime cannot
+ * Windows built-in OCR fallback, used only when the OnnxOCR runtime cannot
  * load (for example on a machine where the native addon is blocked).
  * The PNG is piped through stdin so it never touches disk.
  */
@@ -110,30 +133,30 @@ function runWindowsOcr(png: Buffer): Promise<string> {
 }
 
 /** Recognise one PNG buffer with a three-tier strategy:
- *  1. Small 模型直接识别原图
+ *  1. OnnxOCR PP-OCRv5 模型直接识别原图
  *  2. 放大后重试（对极小/低分辨率截图）
  *  3. Windows OCR 兜底
  */
 export async function ocrImageBuffer(buffer: Buffer): Promise<OcrResult> {
   // 第 1 层：原样识别
   try {
-    const direct = await tryPaddle(buffer)
+    const direct = await tryOnnx(buffer)
     if (direct) return direct
-    console.warn('PADDLE_OCR_EMPTY direct')
+    console.warn('ONNX_OCR_EMPTY direct')
   } catch (error) {
-    console.warn('PADDLE_OCR_FAILED direct', error)
+    console.warn('ONNX_OCR_FAILED direct', error)
   }
 
   // 第 2 层：放大后重试
   try {
     const scaled = upscaleForOcr(buffer, 960)
     if (scaled !== buffer) {
-      const retry = await tryPaddle(scaled)
+      const retry = await tryOnnx(scaled)
       if (retry) return retry
-      console.warn('PADDLE_OCR_EMPTY upscaled')
+      console.warn('ONNX_OCR_EMPTY upscaled')
     }
   } catch (error) {
-    console.warn('PADDLE_OCR_FAILED upscaled', error)
+    console.warn('ONNX_OCR_FAILED upscaled', error)
   }
 
   // 第 3 层：Windows OCR 兜底
